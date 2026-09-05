@@ -895,7 +895,7 @@ export default function OutfitBuilder({
                               />
                               {/* Graphic core */}
                               <div className="w-10 h-14 flex items-center justify-center">
-                                <ApparelSilhouette category={garment.aiSuggestedCategory || "Tops"} hexColor={garment.hex} />
+                                <ApparelSilhouette item={garment} />
                               </div>
                               {/* Info */}
                               <div className="w-full pt-1 border-t border-dashed border-stone-100 relative">
@@ -1248,7 +1248,7 @@ export default function OutfitBuilder({
                       </span>
                       
                       <div className="w-10 h-14 flex items-center justify-center">
-                        <ApparelSilhouette category={garment.aiSuggestedCategory || "Tops"} hexColor={garment.hex} />
+                        <ApparelSilhouette item={garment} />
                       </div>
                       <div className="w-full border-t border-dashed border-stone-100 pt-0.5 relative">
                         <p className="text-[9px] font-bold text-brand-charcoal truncate block capitalize leading-none mb-0.5 pr-4">

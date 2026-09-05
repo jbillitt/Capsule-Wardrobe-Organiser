@@ -2,6 +2,10 @@ import React from "react";
 import { WardrobeItem } from "../types";
 import { CheckCircle2, Bookmark, Eye, Tag, Edit, Trash2 } from "lucide-react";
 import { motion } from "motion/react";
+import { ApparelSilhouette } from "./ApparelSilhouette";
+
+// Re-exported so existing imports keep working.
+export { ApparelSilhouette };
 
 interface WardrobeCardProps {
   key?: React.Key;
@@ -10,86 +14,6 @@ interface WardrobeCardProps {
   onSelect: (item: WardrobeItem) => void;
   onDelete?: (id: string) => void;
   onToggleStatus?: (id: string) => void;
-}
-
-// Custom curated minimalist vector silhouette blueprints
-export function ApparelSilhouette({ category, hexColor }: { category: string; hexColor: string }) {
-  const normalizedCategory = (category || "Tops").toLowerCase();
-  const fill = hexColor || "#cbd5e1";
-
-  // Render a beautifully crafted high-contrast vector apparel blueprint matching the exact hex color!
-  switch (normalizedCategory) {
-    case "outerwear":
-      return (
-        <svg viewBox="0 0 100 120" className="w-full h-full opacity-90 transition-all duration-300 transform hover:scale-105" filter="drop-shadow(0 4px 6px rgba(0,0,0,0.05))">
-          {/* Long Minimalist Coat Trenchcoat */}
-          <path d="M50,15 L32,32 L32,110 L48,110 L48,65 L52,65 L52,110 L68,110 L68,32 Z" fill={fill} />
-          {/* Collar/Lapels detailing */}
-          <path d="M50,15 L32,32 L44,45 Z" fill="#ffffff" opacity="0.15" />
-          <path d="M50,15 L68,32 L56,45 Z" fill="#ffffff" opacity="0.15" />
-          {/* Belt sash */}
-          <rect x="31" y="52" width="38" height="6" fill="#1e293b" opacity="0.25" rx="1" />
-        </svg>
-      );
-    case "bottoms":
-      return (
-        <svg viewBox="0 0 100 120" className="w-full h-full opacity-90 transition-all duration-300 transform hover:scale-105" filter="drop-shadow(0 4px 6px rgba(0,0,0,0.05))">
-          {/* Wide Leg Tailored Pants trousers */}
-          <path d="M30,20 L70,20 L66,110 L51,110 L50,45 L49,110 L34,110 Z" fill={fill} />
-          {/* Belt Loops or crease lines */}
-          <line x1="42" y1="20" x2="42" y2="105" stroke="#ffffff" strokeWidth="0.5" strokeOpacity="0.2" strokeDasharray="2 2" />
-          <line x1="58" y1="20" x2="58" y2="105" stroke="#ffffff" strokeWidth="0.5" strokeOpacity="0.2" strokeDasharray="2 2" />
-        </svg>
-      );
-    case "dresses":
-      return (
-        <svg viewBox="0 0 100 120" className="w-full h-full opacity-90 transition-all duration-300 transform hover:scale-105" filter="drop-shadow(0 4px 6px rgba(0,0,0,0.05))">
-          {/* Elegant Slip Silk Dress */}
-          <path d="M38,15 L62,15 L64,30 L72,110 L28,110 L36,30 Z" fill={fill} />
-          {/* Spaghetti straps */}
-          <line x1="38" y1="15" x2="38" y2="8" stroke={fill} strokeWidth="2" />
-          <line x1="62" y1="15" x2="62" y2="8" stroke={fill} strokeWidth="2" />
-          {/* Drape accent lines */}
-          <path d="M32,38 Q50,43 68,38" fill="none" stroke="#ffffff" strokeWidth="1" strokeOpacity="0.25" />
-          <path d="M30,60 Q50,66 70,60" fill="none" stroke="#ffffff" strokeWidth="1" strokeOpacity="0.15" />
-        </svg>
-      );
-    case "shoes":
-      return (
-        <svg viewBox="0 0 120 100" className="w-full h-full opacity-90 transition-all duration-300 transform hover:scale-105" filter="drop-shadow(0 4px 6px rgba(0,0,0,0.05))">
-          {/* Sleek Pointed Slipper Loafers / Boots */}
-          <path d="M15,65 Q15,45 35,42 Q60,40 105,62 Q105,75 80,75 L25,75 Q15,75 11,68" fill={fill} />
-          {/* Heel rubber sole details */}
-          <path d="M15,73 L28,73 L26,79 L17,79 Z" fill="#111111" opacity="0.6" />
-          <path d="M32,74 L98,74 L94,76 L35,76 Z" fill="#111111" opacity="0.4" />
-          {/* Stitch detailing */}
-          <path d="M38,45 Q55,46 92,62" fill="none" stroke="#ffffff" strokeWidth="1" strokeOpacity="0.3" strokeDasharray="1.5 1.5" />
-        </svg>
-      );
-    case "accessories":
-      return (
-        <svg viewBox="0 0 100 120" className="w-full h-full opacity-90 transition-all duration-300 transform hover:scale-105" filter="drop-shadow(0 4px 6px rgba(0,0,0,0.05))">
-          {/* Minimalist shoulder clutch bag */}
-          <rect x="25" y="45" width="50" height="35" rx="3" fill={fill} />
-          {/* Leather strap loop */}
-          <path d="M32,45 C32,15 68,15 68,45" fill="none" stroke={fill} strokeWidth="4" />
-          {/* Flap enclosure */}
-          <path d="M25,45 L75,45 L68,62 L32,62 Z" fill="#111111" opacity="0.08" />
-          {/* Brass button lock */}
-          <circle cx="50" cy="57" r="3.5" fill="#eab308" />
-        </svg>
-      );
-    case "tops":
-    default:
-      return (
-        <svg viewBox="0 0 100 120" className="w-full h-full opacity-90 transition-all duration-300 transform hover:scale-105" filter="drop-shadow(0 4px 6px rgba(0,0,0,0.05))">
-          {/* Classic Ribbed Sweater / T-Shirt */}
-          <path d="M30,18 L38,18 Q50,22 62,18 L70,18 L88,38 L76,48 L70,42 L70,110 L30,110 L30,42 L24,48 L12,38 Z" fill={fill} />
-          {/* Crewneck border details */}
-          <path d="M38,18 Q50,21 62,18" fill="none" stroke="#ffffff" strokeWidth="1.5" strokeOpacity="0.4" />
-        </svg>
-      );
-  }
 }
 
 export default function WardrobeCard({ item, cardNumber, onSelect, onDelete, onToggleStatus }: WardrobeCardProps) {
@@ -158,7 +82,7 @@ export default function WardrobeCard({ item, cardNumber, onSelect, onDelete, onT
 
             {/* Dynamic Apparel silhouette */}
             <div className="w-full h-full max-w-[70px] max-h-[110px] flex items-center justify-center z-1 pt-4">
-              <ApparelSilhouette category={item.aiSuggestedCategory || "Tops"} hexColor={item.hex} />
+              <ApparelSilhouette item={item} />
             </div>
           </>
         )}

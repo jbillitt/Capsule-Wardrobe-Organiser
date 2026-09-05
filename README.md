@@ -19,7 +19,46 @@ There is nothing to configure. No `.env`, no key.
 npm test             # the engine's checks
 npm run lint         # tsc --noEmit
 npm run audit        # how much of the wardrobe does the lexicon recognise?
+npm run silhouettes  # render every garment icon to silhouettes.html
 ```
+
+## Garment silhouettes
+
+Every card draws a shape for the *specific* garment — a boot for a boot, a bag for a
+bag — across 37 kinds. The shape is resolved from the garment's **name** through the
+same lexicon the styling engine scores with, not from the stored category, because a
+spreadsheet import rarely sets one. A garment the lexicon does not recognise draws a
+coat hanger rather than pretending to be a t-shirt.
+
+`npm run silhouettes` renders them all to a page and fails if two different kinds
+somehow draw the same picture.
+
+## Where the wardrobe actually lives
+
+**In the browser, not in this repo.** It is `localStorage` on one machine, in one
+browser profile, at one address. `git pull` does not bring it with you, and
+`http://localhost:3000` and `http://localhost:5173` are two different stores.
+
+That makes it the only copy of a lot of typing, so the load path is built around one
+rule: **data we cannot read is never overwritten.** A wardrobe that fails to parse is
+left exactly as it is, copied to a `capsule_closet_wardrobe.unreadable.<time>` key, and
+saving is switched off until you restore something known-good. It is never quietly
+replaced with the sample capsule.
+
+If something looks wrong:
+
+- **Backup** in the header writes a JSON file containing every garment *and its
+  photos*. The CSV export cannot carry images. This is the only way to move a wardrobe
+  to another computer or browser.
+- **Restore** reads that file back. It also accepts a bare array of items, so a
+  wardrobe rescued by hand out of another browser's storage can be pasted straight in.
+- The **stethoscope button** prints a diagnostics report: which origin you are on, how
+  many items loaded, how many bytes are stored, the seasons and categories present, every
+  storage key on that origin (flagging any that look like a wardrobe), and a log of
+  anything that failed. "Copy report" puts it on the clipboard.
+
+Seeing exactly ten sample garments means the browser had nothing saved for that origin —
+the banner will say so, and the report will show which origin it looked at.
 
 ## How suggestions are made
 

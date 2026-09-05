@@ -178,6 +178,38 @@ test("retailer colour names resolve to real hues", () => {
   }
 });
 
+test("garments resolve to a specific kind, not a default t-shirt", () => {
+  const kindOf = (name: string) =>
+    traitsFor({ id: "k", item: name, color: "", hex: "", description: "", brand: "", notes: "", status: "existing" } as WardrobeItem).kind;
+
+  // The bugs that made every card render as a tee.
+  assert.equal(kindOf("Pima cotton t-shirt"), "tee", '"t-shirt" contains "shirt" and must not lose to it');
+  assert.equal(kindOf("Cotton sweatshirt"), "sweatshirt", '"sweatshirt" also contains "tshirt"');
+  assert.equal(kindOf("Linen midi dress"), "dress", "a midi dress is not a shirt dress");
+  assert.equal(kindOf("Shirt dress"), "shirt-dress");
+  assert.equal(kindOf("High waisted denim shorts"), "shorts", "denim shorts are shorts, not jeans");
+  assert.equal(kindOf("Straight leg jeans"), "jeans");
+
+  // A garment gets its own picture.
+  assert.equal(kindOf("Chelsea boots"), "boot");
+  assert.equal(kindOf("White leather sneakers"), "sneaker");
+  assert.equal(kindOf("Block heel pumps"), "heel");
+  assert.equal(kindOf("Leather sandals"), "sandal");
+  assert.equal(kindOf("Leather tote"), "bag");
+  assert.equal(kindOf("Wool scarf"), "scarf");
+  assert.equal(kindOf("Leather belt"), "belt");
+  assert.equal(kindOf("Wool beanie"), "hat");
+  assert.equal(kindOf("Crew socks"), "socks");
+  assert.equal(kindOf("Gold hoop earrings"), "jewellery");
+  assert.equal(kindOf("Cropped cardigan"), "cardigan");
+  assert.equal(kindOf("Tailored blazer"), "blazer");
+  assert.equal(kindOf("Down puffer"), "puffer");
+  assert.equal(kindOf("Pleated midi skirt"), "skirt");
+
+  // Unrecognised stays unrecognised rather than silently becoming a top.
+  assert.equal(kindOf("Something Entirely Unheard Of"), "unknown");
+});
+
 test("traits come out of plain-text fields", () => {
   const linen = traitsFor(WARDROBE[0]);
   assert.equal(linen.slot, "base");

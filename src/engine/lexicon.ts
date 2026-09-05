@@ -10,8 +10,23 @@ import { Hsl, ColourRole, hexToHsl, nameToHex, colourRole, isNeutral, isUnknownH
 /** Finer than the six display categories: layering position matters to scoring. */
 export type Slot = "base" | "mid" | "outer" | "bottom" | "dress" | "shoe" | "bag" | "accessory";
 
+/**
+ * The specific garment, where the slot is only the layering role. Drives the
+ * card silhouettes, so a boot gets a boot and a bag gets a bag.
+ */
+export type GarmentKind =
+  | "puffer" | "coat" | "trench" | "blazer" | "denim-jacket" | "jacket" | "vest"
+  | "cardigan" | "jumper" | "sweatshirt"
+  | "dress" | "shirt-dress" | "overalls"
+  | "shirt" | "cami" | "tank" | "henley" | "swim" | "tee" | "breton"
+  | "leggings" | "trousers" | "jeans" | "shorts" | "skirt"
+  | "heel" | "loafer" | "boot" | "sneaker" | "sandal" | "shoe"
+  | "bag" | "socks" | "jewellery" | "hat" | "scarf" | "belt" | "sunglasses"
+  | "unknown";
+
 export interface Traits {
   id: string;
+  kind: GarmentKind;
   slot: Slot;
   category: string;
   /** 1 (athleisure) .. 5 (formal) */
@@ -27,52 +42,56 @@ export interface Traits {
   confidence: number;
 }
 
-/** [pattern, slot, formality, warmth] — ordered, first match wins. */
-const GARMENTS: [RegExp, Slot, number, number][] = [
+/** [pattern, kind, slot, formality, warmth] — ordered, first match wins. */
+const GARMENTS: [RegExp, GarmentKind, Slot, number, number][] = [
   // Outerwear
-  [/puffer|down jacket|parka|shearling/, "outer", 2, 5],
-  [/wool coat|overcoat|longline coat/, "outer", 4, 5],
-  [/trench|mac\b|raincoat/, "outer", 4, 3],
-  [/blazer|tailored jacket/, "outer", 4, 3],
-  [/denim jacket|jean jacket|shacket|utility jacket/, "outer", 2, 3],
-  [/coat|jacket|duster|poncho|cape/, "outer", 3, 4],
-  [/gilet|vest\b/, "outer", 2, 3],
+  [/puffer|down jacket|parka|shearling/, "puffer", "outer", 2, 5],
+  [/wool coat|overcoat|longline coat/, "coat", "outer", 4, 5],
+  [/trench|mac\b|raincoat/, "trench", "outer", 4, 3],
+  [/blazer|tailored jacket/, "blazer", "outer", 4, 3],
+  [/denim jacket|jean jacket|shacket|utility jacket/, "denim-jacket", "outer", 2, 3],
+  [/coat|jacket|duster|poncho|cape/, "jacket", "outer", 3, 4],
+  [/gilet|vest\b/, "vest", "outer", 2, 3],
   // Mid layers. "Cardi" is how half of New Zealand retail spells it.
-  [/cardigan|cardi\b|wrap knit/, "mid", 3, 4],
-  [/jumper|sweater|knit|pullover|crewneck|merino/, "mid", 3, 4],
-  [/sweatshirt|hoodie|fleece/, "mid", 1, 4],
-  // Dresses
-  [/shirt dress|midi dress|maxi dress/, "dress", 4, 2],
-  [/dress|gown|frock|jumpsuit|playsuit/, "dress", 4, 2],
-  [/overall|dungaree|pinafore/, "dress", 3, 3],
-  // Bases
-  [/button.?down|button.?up|shirt|blouse/, "base", 3, 2],
-  [/camisole|cami\b|silk top|bodysuit/, "base", 4, 1],
-  [/singlet|tank|vest top/, "base", 2, 1],
-  [/henley|polo\b|tunic/, "base", 3, 2],
-  [/swim|bikini|togs|one.?piece/, "base", 1, 1],
-  [/tee|t.?shirt|top\b/, "base", 2, 2],
-  [/breton|stripe top/, "base", 3, 2],
-  // Bottoms
-  [/legging|track pant|jogger|sweatpant/, "bottom", 1, 3],
-  [/tailored trouser|wide leg trouser|dress pant/, "bottom", 4, 3],
-  [/trouser|chino|cargo|cul+ot+e/, "bottom", 3, 3],
-  [/jean|denim short|denim\b/, "bottom", 2, 3],
-  [/short\b|shorts/, "bottom", 2, 1],
-  [/skirt/, "bottom", 3, 2],
-  [/pant/, "bottom", 3, 3],
+  [/cardigan|cardi\b|wrap knit/, "cardigan", "mid", 3, 4],
+  [/jumper|sweater|knit|pullover|crewneck|merino/, "jumper", "mid", 3, 4],
+  [/sweatshirt|hoodie|fleece/, "sweatshirt", "mid", 1, 4],
+  // Dresses. Only a shirt dress is a shirt dress; a midi is just a dress.
+  [/shirt.?dress/, "shirt-dress", "dress", 4, 2],
+  [/dress|gown|frock|jumpsuit|playsuit/, "dress", "dress", 4, 2],
+  [/overall|dungaree|pinafore/, "overalls", "dress", 3, 3],
+  // Bases. Tee before shirt: "t-shirt" contains "shirt" and would lose to it.
+  [/breton|stripe top/, "breton", "base", 3, 2],
+  [/\bt.?shirt\b|\btee\b|\btees\b/, "tee", "base", 2, 2],
+  [/button.?down|button.?up|shirt|blouse/, "shirt", "base", 3, 2],
+  [/camisole|cami\b|silk top|bodysuit/, "cami", "base", 4, 1],
+  [/singlet|tank|vest top/, "tank", "base", 2, 1],
+  [/henley|polo\b|tunic/, "henley", "base", 3, 2],
+  [/swim|bikini|togs|one.?piece/, "swim", "base", 1, 1],
+  [/top\b/, "tee", "base", 2, 2],
+  // Bottoms. Shorts before jeans, so "denim shorts" are shorts, not jeans.
+  [/legging|track pant|jogger|sweatpant/, "leggings", "bottom", 1, 3],
+  [/tailored trouser|wide leg trouser|dress pant/, "trousers", "bottom", 4, 3],
+  [/trouser|chino|cargo|cul+ot+e/, "trousers", "bottom", 3, 3],
+  [/\bshorts\b|\bshort\b(?!\s*[- ]?sleeve)/, "shorts", "bottom", 2, 1],
+  [/jean|denim\b/, "jeans", "bottom", 2, 3],
+  [/skirt/, "skirt", "bottom", 3, 2],
+  [/pant/, "trousers", "bottom", 3, 3],
   // Shoes
-  [/heel|pump|stiletto/, "shoe", 5, 2],
-  [/loafer|brogue|oxford|ballet flat/, "shoe", 4, 2],
-  [/ankle boot|chelsea|blundstone|martens|boot/, "shoe", 3, 4],
-  [/sneaker|trainer|plimsoll/, "shoe", 2, 2],
-  [/sandal|slide|jandal|thong/, "shoe", 2, 1],
-  [/mule|clog|flats?\b|slingback|shoe/, "shoe", 3, 2],
+  [/heel|pump|stiletto/, "heel", "shoe", 5, 2],
+  [/loafer|brogue|oxford|ballet flat/, "loafer", "shoe", 4, 2],
+  [/ankle boot|chelsea|blundstone|martens|boot/, "boot", "shoe", 3, 4],
+  [/sneaker|trainer|plimsoll/, "sneaker", "shoe", 2, 2],
+  [/sandal|slide|jandal|thong/, "sandal", "shoe", 2, 1],
+  [/mule|clog|flats?\b|slingback|shoe/, "shoe", "shoe", 3, 2],
   // Bags and accessories
-  [/tote|handbag|crossbody|clutch|backpack|bag\b|purse/, "bag", 3, 2],
-  [/sock|tights|stocking/, "accessory", 2, 3],
-  [/\bring\b|bracelet|brooch|bangle/, "accessory", 4, 2],
-  [/belt|scarf|hat|cap\b|beanie|sunglasses|jewel|necklace|earring|watch/, "accessory", 3, 2],
+  [/tote|handbag|crossbody|clutch|backpack|bag\b|purse/, "bag", "bag", 3, 2],
+  [/sock|tights|stocking/, "socks", "accessory", 2, 3],
+  [/\bring\b|bracelet|brooch|bangle|jewel|necklace|earring|watch/, "jewellery", "accessory", 4, 2],
+  [/sunglasses|eyewear/, "sunglasses", "accessory", 3, 2],
+  [/hat|cap\b|beanie/, "hat", "accessory", 3, 2],
+  [/scarf|shawl|wrap\b/, "scarf", "accessory", 3, 4],
+  [/belt/, "belt", "accessory", 3, 2],
 ];
 
 /**
@@ -126,13 +145,15 @@ export function traitsFor(item: WardrobeItem): Traits {
   const prose = [item.description, item.notes, item.color].filter(Boolean).join(" ").toLowerCase();
   const all = `${name} ${prose}`;
 
+  let kind: GarmentKind = "unknown";
   let slot: Slot = "base";
   let formality = 3;
   let warmth = 3;
   let matchedGarment = false;
 
-  for (const [pattern, s, f, w] of GARMENTS) {
+  for (const [pattern, k, s, f, w] of GARMENTS) {
     if (pattern.test(name)) {
+      kind = k;
       slot = s;
       formality = f;
       warmth = w;
@@ -168,7 +189,10 @@ export function traitsFor(item: WardrobeItem): Traits {
   }
 
   // Handbag Inventory is a season, not a garment type.
-  if (item.season === "Handbag Inventory") slot = "bag";
+  if (item.season === "Handbag Inventory") {
+    slot = "bag";
+    if (kind === "unknown") kind = "bag";
+  }
 
   const hex = item.hex && /^#[0-9a-fA-F]{3,6}$/.test(item.hex) ? item.hex : nameToHex(item.color);
   const hsl = hexToHsl(hex);
@@ -179,6 +203,7 @@ export function traitsFor(item: WardrobeItem): Traits {
 
   return {
     id: item.id,
+    kind,
     slot,
     category: item.aiSuggestedCategory || guessCategory(item.item || "", item.season),
     formality: clamp(Math.round(formality), 1, 5),

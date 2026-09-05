@@ -2,6 +2,17 @@ import React, { useState, useEffect } from "react";
 import { WardrobeItem, OutfitSuggestion } from "./types";
 import { initialCuratedWardrobe, exportToCSVString, SEASONS_CONFIG } from "./data";
 import { nameToHex } from "./engine/colour";
+import {
+  WARDROBE_KEY,
+  OUTFITS_KEY,
+  loadList,
+  saveList,
+  logEvent,
+  buildDiagnostics,
+  formatDiagnostics,
+  buildBackup,
+  parseBackup,
+} from "./storage";
 import WardrobeCard, { ApparelSilhouette } from "./components/WardrobeCard";
 import OutfitBuilder from "./components/OutfitBuilder";
 import AnalyticsPanel from "./components/AnalyticsPanel";
@@ -29,6 +40,7 @@ import {
   Link,
   Globe,
   Eye,
+  Stethoscope,
   Image as ImageIcon
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
@@ -142,41 +154,63 @@ export default function App() {
   const [isCloning, setIsCloning] = useState(false);
   const [cloneSeason, setCloneSeason] = useState("Summer 25-26");
 
-  // Load from localStorage on mount
+  // Storage health. Saving stays off until we know the existing data was read
+  // cleanly, so a bad read can never overwrite a real wardrobe.
+  const [storageReady, setStorageReady] = useState(false);
+  const [storageNotice, setStorageNotice] = useState<{ tone: "info" | "error"; text: string } | null>(null);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [diagnosticsText, setDiagnosticsText] = useState("");
+
+  // Load from localStorage on mount.
+  //
+  // Saving is gated on this having succeeded. A wardrobe we could not read is
+  // left exactly as it is: the seed data is only ever used for a genuinely
+  // empty browser, never as a fallback for a failed read, because the save
+  // effect below would immediately write it over the real thing.
   useEffect(() => {
-    const cachedWardrobe = localStorage.getItem("capsule_closet_wardrobe");
-    const cachedOutfits = localStorage.getItem("capsule_closet_outfits");
-    
-    if (cachedWardrobe) {
-      try {
-        setWardrobe(JSON.parse(cachedWardrobe));
-      } catch (e) {
-        setWardrobe(initialCuratedWardrobe);
-      }
-    } else {
-      // Seed with initial gorgeous data
+    const read = loadList<WardrobeItem>(WARDROBE_KEY);
+    logEvent(`wardrobe read: ${read.status} - ${read.message}`);
+
+    if (read.status === "loaded") {
+      setWardrobe(read.items);
+      setStorageReady(true);
+    } else if (read.status === "empty") {
+      logEvent("no saved wardrobe on this origin; seeding with the sample capsule");
       setWardrobe(initialCuratedWardrobe);
+      setStorageReady(true);
+      setStorageNotice({
+        tone: "info",
+        text: `This browser has no saved wardrobe for ${location.origin}, so the sample capsule is shown. If your wardrobe was entered on another machine, browser, or a different address, it is still there - use "Restore backup" below to bring it across.`,
+      });
+    } else {
+      // unreadable or unavailable: show nothing rather than pretending, and
+      // refuse to save so the stored value cannot be clobbered.
+      setWardrobe([]);
+      setStorageReady(false);
+      setStorageNotice({ tone: "error", text: read.message });
     }
 
-    if (cachedOutfits) {
-      try {
-        setSavedOutfits(JSON.parse(cachedOutfits));
-      } catch (e) {
-        setSavedOutfits([]);
-      }
-    }
+    const outfitsRead = loadList<OutfitSuggestion>(OUTFITS_KEY);
+    logEvent(`outfits read: ${outfitsRead.status} - ${outfitsRead.message}`);
+    if (outfitsRead.status === "loaded") setSavedOutfits(outfitsRead.items);
   }, []);
 
-  // Sync to localStorage
+  // Sync to localStorage, but only once we know we read it cleanly.
   useEffect(() => {
-    if (wardrobe.length > 0) {
-      localStorage.setItem("capsule_closet_wardrobe", JSON.stringify(wardrobe));
+    if (!storageReady) return;
+    if (wardrobe.length === 0) return;
+    const result = saveList(WARDROBE_KEY, wardrobe);
+    if (!result.ok) {
+      logEvent(`wardrobe save FAILED: ${result.message}`);
+      setStorageNotice({ tone: "error", text: result.message });
     }
-  }, [wardrobe]);
+  }, [wardrobe, storageReady]);
 
   useEffect(() => {
-    localStorage.setItem("capsule_closet_outfits", JSON.stringify(savedOutfits));
-  }, [savedOutfits]);
+    if (!storageReady) return;
+    const result = saveList(OUTFITS_KEY, savedOutfits);
+    if (!result.ok) logEvent(`outfit save FAILED: ${result.message}`);
+  }, [savedOutfits, storageReady]);
 
   // Export to local download file
   const handleDownloadBackup = () => {
@@ -191,15 +225,69 @@ export default function App() {
     document.body.removeChild(link);
   };
 
+  // Full backup, photos included. The CSV cannot carry images, and the wardrobe
+  // lives only in this browser, so this is the way to move it between machines.
+  const handleDownloadFullBackup = () => {
+    const backup = buildBackup(wardrobe, savedOutfits);
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `capsule-wardrobe-backup-${new Date().toISOString().slice(0, 10)}.json`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    logEvent(`exported a full backup of ${wardrobe.length} garments`);
+  };
+
+  const handleRestoreBackup = async (file: File) => {
+    const result = parseBackup(await file.text());
+    logEvent(`restore from "${file.name}": ${result.ok ? "ok" : "failed"} - ${result.message}`);
+
+    if (!result.ok || !result.wardrobe) {
+      setStorageNotice({ tone: "error", text: result.message });
+      return;
+    }
+    if (
+      wardrobe.length > 0 &&
+      !window.confirm(
+        `Replace the ${wardrobe.length} garments currently shown with ${result.wardrobe.length} from this backup?`
+      )
+    ) {
+      return;
+    }
+
+    // A restore is also the recovery path from an unreadable store, so allow
+    // saving again now that we hold data we know is good.
+    setStorageReady(true);
+    setWardrobe(result.wardrobe);
+    if (result.outfits?.length) setSavedOutfits(result.outfits);
+    setStorageNotice({ tone: "info", text: result.message });
+  };
+
+  const handleShowDiagnostics = () => {
+    const report = formatDiagnostics(buildDiagnostics(wardrobe, savedOutfits));
+    setDiagnosticsText(report);
+    setShowDiagnostics(true);
+    console.info(report);
+  };
+
   const handleImportNewItems = (newItems: WardrobeItem[]) => {
     setWardrobe(prev => [...prev, ...newItems]);
+    logEvent(`imported ${newItems.length} garments from a spreadsheet`);
     setActiveTab("closet");
   };
 
   const handleClearCloset = () => {
-    if (window.confirm("Are you sure you want to completely clear the wardrobe? This will reset all local changes.")) {
+    if (
+      window.confirm(
+        `Delete all ${wardrobe.length} garments from this browser? Download a backup first - this cannot be undone.`
+      )
+    ) {
+      logEvent(`wardrobe cleared by the user (${wardrobe.length} garments)`);
       setWardrobe([]);
-      localStorage.removeItem("capsule_closet_wardrobe");
+      localStorage.removeItem(WARDROBE_KEY);
     }
   };
 
@@ -847,11 +935,46 @@ export default function App() {
               <button
                 onClick={handleDownloadBackup}
                 className="hidden sm:flex items-center gap-1.5 px-5 py-2.5 bg-white border border-brand-border text-brand-charcoal font-semibold text-[10px] tracking-widest uppercase rounded hover:bg-brand-greige cursor-pointer transition-colors"
-                title="Saves and updates your .xlsx / .csv backup sheet instantly"
+                title="Spreadsheet export. Does not include photos - use Backup for that."
               >
-                <Download className="w-3.5 h-3.5" /> Export Data
+                <Download className="w-3.5 h-3.5" /> Export CSV
               </button>
             )}
+
+            {wardrobe.length > 0 && (
+              <button
+                onClick={handleDownloadFullBackup}
+                className="hidden sm:flex items-center gap-1.5 px-5 py-2.5 bg-white border border-brand-border text-brand-charcoal font-semibold text-[10px] tracking-widest uppercase rounded hover:bg-brand-greige cursor-pointer transition-colors"
+                title="Full backup including photos. This is the only way to move a wardrobe to another computer or browser."
+              >
+                <Download className="w-3.5 h-3.5" /> Backup
+              </button>
+            )}
+
+            <label
+              className="hidden sm:flex items-center gap-1.5 px-5 py-2.5 bg-white border border-brand-border text-brand-charcoal font-semibold text-[10px] tracking-widest uppercase rounded hover:bg-brand-greige cursor-pointer transition-colors"
+              title="Restore a wardrobe from a backup file"
+            >
+              <Upload className="w-3.5 h-3.5" /> Restore
+              <input
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                onChange={e => {
+                  const file = e.target.files?.[0];
+                  if (file) handleRestoreBackup(file);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+
+            <button
+              onClick={handleShowDiagnostics}
+              className="hidden sm:flex items-center gap-1.5 px-3 py-2.5 bg-white border border-brand-border text-brand-sage font-semibold text-[10px] tracking-widest uppercase rounded hover:bg-brand-greige cursor-pointer transition-colors"
+              title="What is stored in this browser, and what failed to load"
+            >
+              <Stethoscope className="w-3.5 h-3.5" />
+            </button>
 
             <button
               onClick={() => setShowAddForm(true)}
@@ -861,6 +984,43 @@ export default function App() {
             </button>
           </div>
         </div>
+
+        {/* Storage health. Loud, because the wardrobe is only stored here. */}
+        {storageNotice && (
+          <div
+            className={`max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 mb-2 rounded flex items-start gap-3 text-xs leading-relaxed ${
+              storageNotice.tone === "error"
+                ? "bg-red-50 border border-red-200 text-red-900"
+                : "bg-amber-50 border border-amber-200 text-amber-900"
+            }`}
+          >
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <div className="flex-1 space-y-1">
+              <p>{storageNotice.text}</p>
+              <div className="flex flex-wrap gap-3 pt-1">
+                <button onClick={handleShowDiagnostics} className="underline font-semibold cursor-pointer">
+                  Show diagnostics
+                </button>
+                <label className="underline font-semibold cursor-pointer">
+                  Restore from backup
+                  <input
+                    type="file"
+                    accept="application/json,.json"
+                    className="hidden"
+                    onChange={e => {
+                      const file = e.target.files?.[0];
+                      if (file) handleRestoreBackup(file);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+              </div>
+            </div>
+            <button onClick={() => setStorageNotice(null)} className="shrink-0 cursor-pointer" title="Dismiss">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
         {/* Global tab layouts */}
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center gap-8 -mb-px">
@@ -1615,7 +1775,7 @@ export default function App() {
                                       <img src={item.imageUrl} alt={item.item} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                                     ) : (
                                       <div className="w-5 h-5 flex items-center justify-center">
-                                        <ApparelSilhouette category={item.aiSuggestedCategory || "Tops"} hexColor={item.hex} />
+                                        <ApparelSilhouette item={item} />
                                       </div>
                                     )}
                                   </div>
@@ -2529,10 +2689,62 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {/* Storage diagnostics: a plain-text report that can be copied and sent. */}
+      <AnimatePresence>
+        {showDiagnostics && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
+            onClick={() => setShowDiagnostics(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.97, y: 10 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.97, y: 10 }}
+              className="bg-white rounded-sm border border-brand-border shadow-xl max-w-3xl w-full max-h-[80vh] flex flex-col"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between px-6 py-4 border-b border-brand-border">
+                <div>
+                  <h3 className="font-serif font-semibold text-brand-charcoal text-lg">Storage diagnostics</h3>
+                  <p className="text-brand-sage text-[11px] mt-0.5">
+                    What this browser is holding, and anything that failed to load. Copy this if you need to report a problem.
+                  </p>
+                </div>
+                <button onClick={() => setShowDiagnostics(false)} className="cursor-pointer text-brand-sage hover:text-brand-charcoal">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <pre className="flex-1 overflow-auto px-6 py-4 text-[11px] font-mono leading-relaxed text-brand-charcoal whitespace-pre-wrap select-text">
+                {diagnosticsText}
+              </pre>
+
+              <div className="flex justify-end gap-2 px-6 py-4 border-t border-brand-border">
+                <button
+                  onClick={() => navigator.clipboard?.writeText(diagnosticsText)}
+                  className="px-4 py-2 bg-white border border-brand-border text-brand-charcoal font-semibold text-[10px] tracking-widest uppercase rounded hover:bg-brand-greige cursor-pointer"
+                >
+                  Copy report
+                </button>
+                <button
+                  onClick={handleDownloadFullBackup}
+                  className="px-4 py-2 bg-brand-charcoal text-white font-semibold text-[10px] tracking-widest uppercase rounded hover:bg-black cursor-pointer"
+                >
+                  Download backup
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Elegant Styled Footer */}
       <footer className="border-t border-stone-200 bg-white py-10 mt-12 text-center text-xs text-stone-400 space-y-1 font-mono">
         <p>© {new Date().getFullYear()} Capsule Wardrobe Studio • Designed for local custom closets.</p>
-        <p>Connected with server-side System Engine 3.5 AI look directors.</p>
+        <p>Outfits are chosen by a local styling engine. No AI, no API keys.</p>
       </footer>
     </div>
   );

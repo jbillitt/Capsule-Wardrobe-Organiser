@@ -9,3 +9,6 @@ memories.md
 
 # Cached retail listings, refreshed on demand
 catalogue.local.json
+
+# Generated silhouette preview
+silhouettes.html
