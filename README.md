@@ -60,6 +60,38 @@ If something looks wrong:
 Seeing exactly ten sample garments means the browser had nothing saved for that origin —
 the banner will say so, and the report will show which origin it looked at.
 
+### Recovering a wardrobe that has gone missing
+
+There is no database in this folder. The server only writes `style-guide.json`,
+`memories.md` and the catalogue cache; the wardrobe has never been stored server-side.
+
+Browsers keep localStorage in LevelDB files inside the browser profile, and LevelDB is
+append-only — it compacts only occasionally, so a wardrobe that was overwritten in the
+app is often still on disk in an older segment.
+
+```bash
+# on HER machine, with the browser fully closed
+npm run recover
+
+# or point it at one profile
+npm run recover -- "C:\Users\<name>\AppData\Local\Google\Chrome\User Data"
+```
+
+It reads every Local Storage segment it can find, pulls out anything shaped like a
+wardrobe, reports the origin and item count of each, and writes the candidates as
+`recovered-wardrobe-<n>-<count>items.json`. Load the largest with **Restore**.
+
+It only reads the profile, and only writes out arrays that really are garments, so
+other sites' data is neither touched nor exported.
+
+**Close the browser first.** While it is running it holds a lock and recent writes stay
+in an unflushed journal.
+
+If the original spreadsheet still exists, re-importing it is the cleaner route. That
+brings back every garment; it loses only photos that were uploaded from disk, since
+those are stored inline as data URLs. Photos found automatically are just links and
+come back on their own.
+
 ## How suggestions are made
 
 `src/engine/` holds the whole thing:

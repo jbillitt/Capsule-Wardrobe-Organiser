@@ -11,6 +11,7 @@
     "lint": "tsc --noEmit",
     "test": "tsx --test src/engine/engine.test.ts src/storage.test.ts",
     "audit": "tsx scripts/audit-mapping.ts",
+    "recover": "node scripts/recover-wardrobe.mjs",
     "silhouettes": "tsx scripts/preview-silhouettes.tsx",
     "catalogue:refresh": "tsx scripts/refresh-catalogue.ts"
   },
