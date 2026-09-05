@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { WardrobeItem, OutfitSuggestion } from "./types";
 import { initialCuratedWardrobe, exportToCSVString, SEASONS_CONFIG } from "./data";
+import { nameToHex } from "./engine/colour";
 import WardrobeCard, { ApparelSilhouette } from "./components/WardrobeCard";
 import OutfitBuilder from "./components/OutfitBuilder";
 import AnalyticsPanel from "./components/AnalyticsPanel";
@@ -106,14 +107,12 @@ export default function App() {
   const [suggestedEnrichments, setSuggestedEnrichments] = useState<{ id: string; originalNotes: string; suggestedNotesAppend: string; item: string }[]>([]);
   const [enrichmentApplied, setEnrichmentApplied] = useState(false);
   const [enrichmentError, setEnrichmentError] = useState<string | null>(null);
-  const [usedSummaryFallback, setUsedSummaryFallback] = useState(false);
 
   // Wardrobe Gaps state
   const [isAnalyzingGaps, setIsAnalyzingGaps] = useState(false);
   const [gapsAssessment, setGapsAssessment] = useState<string>("");
   const [gapsRecommendations, setGapsRecommendations] = useState<{ item: string; category: string; color: string; reason: string }[]>([]);
   const [gapsError, setGapsError] = useState<string | null>(null);
-  const [usedGapsFallback, setUsedGapsFallback] = useState(false);
 
   // Category Condensing & Reassignments
   const [isCondensing, setIsCondensing] = useState(false);
@@ -261,7 +260,7 @@ export default function App() {
     setAiLoading(true);
     try {
       const { imageUrl, ...sanitizedItem } = targetItem;
-      const response = await fetch("/api/gemini/analyze-item", {
+      const response = await fetch("/api/style/analyze-item", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(sanitizedItem)
@@ -478,41 +477,15 @@ export default function App() {
     setAiAutofillQuery("");
   };
 
-  // Standard fast color resolver for adding new clothes
-  const guessHexColor = (colorStr: string): string => {
-    const raw = (colorStr || "grey").toLowerCase().trim();
-    if (raw.includes("navy")) return "#1e3a8a";
-    if (raw.includes("blue")) return "#60a5fa";
-    if (raw.includes("camel")) return "#c19a6b";
-    if (raw.includes("beige") || raw.includes("oatmeal")) return "#eae6df";
-    if (raw.includes("cream") || raw.includes("sand")) return "#f5f5dc";
-    if (raw.includes("white") || raw.includes("ivory")) return "#fafaf9";
-    if (raw.includes("black")) return "#1c1917";
-    if (raw.includes("grey") || raw.includes("gray")) return "#78716c";
-    if (raw.includes("charcoal")) return "#3f3f46";
-    if (raw.includes("olive")) return "#3d5236";
-    if (raw.includes("sage")) return "#9caf88";
-    if (raw.includes("green")) return "#22c55e";
-    if (raw.includes("cherry") || raw.includes("burgundy") || raw.includes("wine")) return "#58181a";
-    if (raw.includes("red")) return "#ef4444";
-    if (raw.includes("brown") || raw.includes("cognac") || raw.includes("tan")) return "#854d0e";
-    if (raw.includes("pink")) return "#f472b6";
-    if (raw.includes("yellow")) return "#fbbf24";
-    return "#cbd5e1";
-  };
+  // Colour resolution lives in the engine so the app and the scorer agree.
+  const guessHexColor = nameToHex;
 
   // AI Autofill fields via prompt search
   const handleAiSearchAutofill = async () => {
     if (!aiAutofillQuery.trim()) return;
     setAiLoading(true);
     try {
-      const response = await fetch("/api/explore-ideas", { // wait, let's use search route
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: aiAutofillQuery })
-      });
-      // Try resolving directly under System Engine suggestions
-      const searchRes = await fetch("/api/gemini/explore-ideas", {
+      const searchRes = await fetch("/api/style/explore-ideas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: aiAutofillQuery })
@@ -590,7 +563,7 @@ export default function App() {
 
       const sanitizedItems = itemsToAnalyze.map(({ imageUrl, ...rest }) => rest);
 
-      const res = await fetch("/api/gemini/summarize-capsule", {
+      const res = await fetch("/api/style/summarize-capsule", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -604,7 +577,6 @@ export default function App() {
       }
 
       const data = await res.json();
-      setUsedSummaryFallback(data.isFallback || false);
       setCapsuleSummaryKeywords(data.capsuleSummaryKeywords || []);
       setCapsuleDescription(data.capsuleDescription || "");
       
@@ -668,7 +640,7 @@ export default function App() {
 
       const sanitizedItemsForGaps = itemsToAnalyze.map(({ imageUrl, ...rest }) => rest);
 
-      const res = await fetch("/api/gemini/analyze-gaps", {
+      const res = await fetch("/api/style/analyze-gaps", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -682,12 +654,11 @@ export default function App() {
       }
 
       const data = await res.json();
-      setUsedGapsFallback(data.isFallback || false);
       setGapsAssessment(data.generalGapAssessment || "");
       setGapsRecommendations(data.suggestedItemsToBuy || []);
     } catch (err: any) {
       console.error(err);
-      setGapsError("Could not run gap analyzer. Check API keys in settings.");
+      setGapsError("Could not run the gap analyser. Check the server log.");
     } finally {
       setIsAnalyzingGaps(false);
     }
@@ -717,7 +688,7 @@ export default function App() {
 
     // Refine details using our standard detail lookup in background
     try {
-      const response = await fetch("/api/gemini/analyze-item", {
+      const response = await fetch("/api/style/analyze-item", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -758,7 +729,7 @@ export default function App() {
         return;
       }
 
-      const res = await fetch("/api/gemini/condense-categories", {
+      const res = await fetch("/api/style/condense-categories", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ categories: currentCats })
@@ -772,7 +743,7 @@ export default function App() {
       setCondenseMapping(data.categoryMapping || null);
     } catch (err: any) {
       console.error(err);
-      setCondenseError("Failed to condense categories list. Verify API service keys in settings.");
+      setCondenseError("Failed to condense the category list. Check the server log.");
     } finally {
       setIsCondensing(false);
     }
@@ -1189,11 +1160,6 @@ export default function App() {
                         <h4 className="text-[10px] uppercase tracking-wider font-bold text-brand-olive mt-1">
                            Style Summary & Keyword Aesthetics
                         </h4>
-                        {usedSummaryFallback && (
-                          <span className="bg-amber-50 text-amber-600 border border-amber-200/60 text-[9px] px-2.5 py-1 rounded-sm font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-3xs">
-                            <Sparkles className="w-2.5 h-2.5" /> Out of AI Tokens today, randomising
-                          </span>
-                        )}
                       </div>
                       <div className="flex flex-wrap gap-2 pt-1 border-b border-brand-border/40 pb-3.5">
                         {capsuleSummaryKeywords.map((kw, i) => (
@@ -1265,11 +1231,6 @@ export default function App() {
                         <h4 className="text-[10px] uppercase tracking-wider font-bold text-brand-olive">
                           ⚖️ Wardrobe Balance & Gap Assessment
                         </h4>
-                        {usedGapsFallback && (
-                          <span className="bg-amber-50 text-amber-600 border border-amber-200/60 text-[9px] px-2.5 py-1 rounded-sm font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-3xs">
-                            <Sparkles className="w-2.5 h-2.5" /> Out of AI Tokens today, randomising
-                          </span>
-                        )}
                       </div>
                       <p className="text-brand-charcoal text-xs leading-relaxed italic mt-1 bg-white p-3.5 border border-brand-border/40 rounded-xl">
                         "{gapsAssessment}"
@@ -2576,3 +2537,4 @@ export default function App() {
     </div>
   );
 }
+

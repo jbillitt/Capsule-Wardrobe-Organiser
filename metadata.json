@@ -2,5 +2,5 @@
   "name": "Capsule Wardrobe Studio",
   "description": "An interactive digital closet and style assistant to explore, organize, and plan outfit capsules from your wardrobe spreadsheet.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": []
 }

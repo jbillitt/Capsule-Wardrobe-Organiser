@@ -303,6 +303,8 @@ export function guessCategory(item: string, season?: string): string {
     raw.includes("puffer") || 
     raw.includes("vest") || 
     raw.includes("cardigan") ||
+    // NZ retail abbreviates it constantly: "Georgie Cardi", "Ted Cardi".
+    /\bcardi\b/.test(raw) ||
     raw.includes("parka") ||
     raw.includes("outerwear") ||
     raw.includes("duster")
@@ -334,9 +336,12 @@ export function guessCategory(item: string, season?: string): string {
     raw.includes("trouser") || 
     raw.includes("pant") || 
     raw.includes("jean") || 
-    raw.includes("skirt") || 
-    raw.includes("short") || 
-    raw.includes("legging") || 
+    raw.includes("skirt") ||
+    // "short" must not swallow "short sleeve" - retailers label half the
+    // catalogue that way, and it sent dresses and tees into Bottoms.
+    /\bshorts\b/.test(raw) ||
+    /\bshort\b(?!\s*[- ]?sleeve)/.test(raw) ||
+    raw.includes("legging") ||
     raw.includes("denim") || 
     raw.includes("slack") || 
     raw.includes("culotte") ||
@@ -352,8 +357,10 @@ export function guessCategory(item: string, season?: string): string {
     raw.includes("unitard") || 
     raw.includes("romper") || 
     raw.includes("slip") || 
-    raw.includes("gown") || 
-    raw.includes("overall") || 
+    raw.includes("gown") ||
+    raw.includes("frock") ||
+    raw.includes("pinafore") ||
+    raw.includes("overall") ||
     raw.includes("dungaree")
   ) {
     return "Dresses";
@@ -377,7 +384,8 @@ export function guessCategory(item: string, season?: string): string {
     raw.includes("clutch") || 
     raw.includes("wallet") || 
     raw.includes("sunglass") || 
-    raw.includes("accessory") ||
+    // "accessor" catches both "accessory" and a retailer's "Accessories" tab.
+    raw.includes("accessor") ||
     raw.includes("eyewear") ||
     raw.includes("socks") ||
     raw.includes("tights")

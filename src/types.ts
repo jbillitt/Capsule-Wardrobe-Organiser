@@ -22,6 +22,11 @@ export interface OutfitSuggestion {
   occasion: string; // e.g. "Casual Weekend", "Work Chic", "Smart Casual"
   aesthetic: string; // e.g. "Quiet Luxury", "French Minimalist"
   stylingNotes: string;
+  /** The scored reasons behind the prose, so the narrative can be audited. */
+  whyItWorks?: string[];
+  score?: number;
+  /** Layering role per item id, needed to log a "wrong in this role" correction. */
+  itemSlots?: Record<string, string>;
 }
 
 export interface WardrobeStats {

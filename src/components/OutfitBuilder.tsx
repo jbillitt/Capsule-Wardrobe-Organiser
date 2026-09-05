@@ -83,7 +83,7 @@ export default function OutfitBuilder({
     return acc;
   }, []);
   const [loading, setLoading] = useState(false);
-  const [usedFallback, setUsedFallback] = useState(false);
+  const [engineNote, setEngineNote] = useState<string | null>(null);
   const [aiOutfits, setAiOutfits] = useState<OutfitSuggestion[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -109,16 +109,31 @@ export default function OutfitBuilder({
   const [isAddingActivity, setIsAddingActivity] = useState(false);
   const [newActivityName, setNewActivityName] = useState("");
 
-  // Local rule/memory logic states
+  // Structured correction state. Each choice below maps to one typed rule the
+  // scorer obeys, rather than to free text nobody can enforce.
   const [reportingOutfitIdx, setReportingOutfitIdx] = useState<number | null>(null);
+  const [correctionKind, setCorrectionKind] = useState<string>("occasion-ban");
+  const [correctionItemId, setCorrectionItemId] = useState<string>("");
+  const [correctionOtherId, setCorrectionOtherId] = useState<string>("");
   const [feedbackText, setFeedbackText] = useState("");
   const [isLoggingMemory, setIsLoggingMemory] = useState(false);
   const [memorySavedMessage, setMemorySavedMessage] = useState<string | null>(null);
   const [savedMemories, setSavedMemories] = useState<string>("");
+  const [savedRules, setSavedRules] = useState<any[]>([]);
   const [showLedger, setShowLedger] = useState(false);
 
+  const CORRECTION_KINDS: { id: string; label: string; needsSecond?: boolean; kind: string; delta?: number }[] = [
+    { id: "pair-ban", label: "These two don't go together", kind: "pair-ban", needsSecond: true },
+    { id: "occasion-ban", label: "Wrong for this occasion", kind: "occasion-ban" },
+    { id: "too-casual", label: "Too casual for this", kind: "formality-adjust", delta: -1 },
+    { id: "too-dressy", label: "Too dressy for this", kind: "formality-adjust", delta: 1 },
+    { id: "too-warm", label: "Warmer than it looks", kind: "warmth-adjust", delta: 1 },
+    { id: "too-cold", label: "Not as warm as it looks", kind: "warmth-adjust", delta: -1 },
+    { id: "slot-dislike", label: "Don't use it in this role", kind: "slot-dislike" },
+  ];
+
   // Dynamic Loader phrase cycling
-  const [loaderPhrase, setLoaderPhrase] = useState("Weaving capsule items together...");
+  const [loaderPhrase, setLoaderPhrase] = useState("Reading the wardrobe...");
 
   useEffect(() => {
     fetchMemoriesLedger();
@@ -152,12 +167,12 @@ export default function OutfitBuilder({
     let interval: NodeJS.Timeout;
     if (loading) {
       const phrases = [
-        "Analyzing color weights & base layers...",
-        "Consulting your repository's memories.md guidelines...",
-        "Intuiting suitabilities based on selected activity...",
-        "Drafting cohesive Parisian outfit capsules...",
-        "Selecting optimal wishlist and closet elements...",
-        "Assembling ultimate look permutations..."
+        "Deriving fabric, formality and warmth from each garment...",
+        "Applying your learned rules from style-guide.json...",
+        "Scoring hue angles across every candidate pairing...",
+        "Checking layer weights run in the right order...",
+        "Ranking combinations against today's activity...",
+        "Writing up why the survivors work..."
       ];
       let tIdx = 0;
       interval = setInterval(() => {
@@ -174,57 +189,79 @@ export default function OutfitBuilder({
       if (res.ok) {
         const data = await res.json();
         setSavedMemories(data.content || "");
+        setSavedRules(data.rules || []);
       }
     } catch (e) {
       console.warn("Could not load memories ledger:", e);
     }
   };
 
-  // Log styling corrections to backend (creates memories.md entries)
-  const logWrongOutfitMemory = async (outfit: OutfitSuggestion, index: number) => {
-    if (!feedbackText.trim()) return;
+  // A correction becomes a typed rule in style-guide.json, keyed on masterId so
+  // it follows the garment across every season capsule it appears in.
+  const submitCorrection = async (outfit: OutfitSuggestion) => {
+    const spec = CORRECTION_KINDS.find(k => k.id === correctionKind);
+    const target = outfit.items.find(i => i.id === correctionItemId);
+    if (!spec || !target) return;
+    if (spec.needsSecond && !correctionOtherId) return;
+
+    const other = outfit.items.find(i => i.id === correctionOtherId);
     setIsLoggingMemory(true);
     setMemorySavedMessage(null);
-
-    const itemsStr = outfit.items.map(g => `${g.item} by ${g.brand || "Unbranded"} (${g.color})`).join(", ");
 
     try {
       const res = await fetch("/api/memory/wrong", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          activity: selectedActivity,
-          feedback: feedbackText,
-          itemsList: itemsStr,
+          kind: spec.kind,
+          key: target.masterId || target.id,
+          label: `${target.item} (${target.color})`,
+          otherKey: other ? other.masterId || other.id : undefined,
+          otherLabel: other ? `${other.item} (${other.color})` : undefined,
+          activity: outfit.occasion || selectedActivity,
+          slot: spec.kind === "slot-dislike" ? outfit.itemSlots?.[target.id] : undefined,
+          delta: spec.delta,
+          note: feedbackText.trim() || undefined,
           outfitName: outfit.name
         })
       });
 
-      if (res.ok) {
-        setMemorySavedMessage(`Successfully logged feedback into the memories ledger file! the system has adjusted its rules.`);
-        setFeedbackText("");
-        setReportingOutfitIdx(null);
-        fetchMemoriesLedger();
-        
-        // Clear message after delay
-        setTimeout(() => setMemorySavedMessage(null), 5000);
-      } else {
-        throw new Error("Could not log memory to back end.");
-      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.details || data.error || "The server rejected the correction.");
+
+      setMemorySavedMessage(data.message || "Rule saved.");
+      setFeedbackText("");
+      setCorrectionItemId("");
+      setCorrectionOtherId("");
+      setReportingOutfitIdx(null);
+      fetchMemoriesLedger();
+      setTimeout(() => setMemorySavedMessage(null), 5000);
     } catch (err: any) {
-      alert("Error saving memory correction: " + err.message);
+      alert("Could not save the correction: " + err.message);
     } finally {
       setIsLoggingMemory(false);
     }
   };
 
+  const handleDeleteRule = async (id: string) => {
+    try {
+      const res = await fetch(`/api/memory/rule/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        const data = await res.json();
+        setSavedRules(data.rules || []);
+      }
+    } catch (err: any) {
+      console.error(err);
+    }
+  };
+
   const handleClearMemories = async () => {
-    if (!confirm("Are you sure you want to reset and clear all styling memories from memories.md?")) return;
+    if (!confirm("Clear every learned rule? The engine will go back to the style guide defaults.")) return;
     try {
       const res = await fetch("/api/memory/clear", { method: "POST" });
       if (res.ok) {
         fetchMemoriesLedger();
-        alert("Repository style memory logs cleared.");
+        alert("All learned rules cleared.");
       }
     } catch (err: any) {
       console.error(err);
@@ -247,10 +284,15 @@ export default function OutfitBuilder({
       // Strip potentially bulky base64 image data before transmission to backend
       const sanitizedItems = filteredWardrobe.map(({ imageUrl, ...rest }) => rest);
       
-      const response = await fetch("/api/gemini/suggest-outfits", {
+      const response = await fetch("/api/style/suggest-outfits", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items: sanitizedItems, objective: finalObjective }),
+        body: JSON.stringify({
+          items: sanitizedItems,
+          objective: finalObjective,
+          activity: selectedActivity,
+          capsule: selectedCapsule,
+        }),
       });
 
       const rawData = await response.json();
@@ -258,10 +300,14 @@ export default function OutfitBuilder({
       if (!response.ok) {
         throw new Error(rawData.details || rawData.error || "Failed to generate outfit capsules");
       }
-      
+
       const responseData = rawData.outfits || rawData;
-      setUsedFallback(rawData.isFallback || false);
-      
+      setEngineNote(
+        rawData.diagnostics?.length
+          ? `No outfit could be built: ${rawData.diagnostics.join("; ")}.`
+          : null
+      );
+
       // Map return IDs back to real wardrobe item references
       const parsedOutfits: OutfitSuggestion[] = responseData.map((out: any) => {
         const itemReferences = (out.itemIds || [])
@@ -274,7 +320,10 @@ export default function OutfitBuilder({
           items: itemReferences,
           occasion: out.occasion || selectedActivity,
           aesthetic: out.aesthetic || "Quiet Luxury",
-          stylingNotes: out.stylingNotes
+          stylingNotes: out.stylingNotes,
+          whyItWorks: out.whyItWorks || [],
+          score: out.score,
+          itemSlots: out.itemSlots || {}
         };
       }).filter((o: any) => o.items.length > 0);
 
@@ -627,9 +676,9 @@ export default function OutfitBuilder({
                   <h4 className="text-[10.5px] uppercase font-bold text-stone-400 tracking-wider">
                     Creative Look board Suggestions ({aiOutfits.length}) Auto-numbered
                   </h4>
-                  {usedFallback && (
-                    <span className="bg-amber-50 text-amber-600 border border-amber-200/60 text-[9px] px-2.5 py-1 rounded-sm font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-3xs">
-                      <Sparkles className="w-2.5 h-2.5" /> Out of AI Tokens today, randomising
+                  {engineNote && (
+                    <span className="bg-amber-50 text-amber-700 border border-amber-200/60 text-[9px] px-2.5 py-1 rounded-sm font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-3xs">
+                      <AlertCircle className="w-2.5 h-2.5" /> {engineNote}
                     </span>
                   )}
                 </div>
@@ -670,10 +719,32 @@ export default function OutfitBuilder({
 
                           <div className="text-xs text-brand-charcoal bg-[#FAF9F6] p-4 rounded-xl border border-brand-border space-y-1.5 leading-relaxed">
                             <span className="font-bold text-brand-charcoal uppercase text-[9px] tracking-wider block font-sans">
-                              Editorial Layering Instructions:
+                              How to wear it:
                             </span>
                             <p>{outfit.stylingNotes}</p>
                           </div>
+
+                          {/* The scored reasons the prose above was generated from. */}
+                          {outfit.whyItWorks && outfit.whyItWorks.length > 0 && (
+                            <div className="text-[11px] text-brand-sage bg-white p-3.5 rounded-xl border border-dashed border-brand-border space-y-1">
+                              <span className="font-bold text-brand-charcoal uppercase text-[9px] tracking-wider block font-sans">
+                                Why this works
+                                {typeof outfit.score === "number" && (
+                                  <span className="float-right font-mono normal-case tracking-normal text-brand-sage">
+                                    score {outfit.score.toFixed(2)}
+                                  </span>
+                                )}
+                              </span>
+                              <ul className="space-y-0.5">
+                                {outfit.whyItWorks.map((why, i) => (
+                                  <li key={i} className="flex gap-1.5">
+                                    <span className="text-brand-olive">·</span>
+                                    <span>{why}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
 
                           <div className="flex flex-wrap items-center gap-2">
                             <button
@@ -691,6 +762,8 @@ export default function OutfitBuilder({
                               onClick={() => {
                                 setReportingOutfitIdx(isReportingThis ? null : index);
                                 setFeedbackText("");
+                                setCorrectionItemId("");
+                                setCorrectionOtherId("");
                               }}
                               className="px-4 py-2.5 bg-red-50 text-red-750 hover:bg-red-100/70 border border-red-200/50 text-[10.5px] font-bold tracking-widest uppercase rounded-sm flex items-center gap-1 transition-all cursor-pointer"
                             >
@@ -709,13 +782,61 @@ export default function OutfitBuilder({
                                 className="bg-red-50/50 rounded-xl p-4 border border-red-200/40 space-y-3 overflow-hidden text-xs"
                               >
                                 <div className="space-y-1">
-                                  <label className="font-bold text-red-950 uppercase text-[9px] tracking-wider block">What did the engine get wrong about this outfit suitability?</label>
-                                  <p className="text-[11px] text-red-900/80 leading-tight">Specify why certain items don't work, color mismatches, or layout suitability faults. This is written onto memories.md, educating the engine instantly.</p>
+                                  <label className="font-bold text-red-950 uppercase text-[9px] tracking-wider block">Why didn't this work?</label>
+                                  <p className="text-[11px] text-red-900/80 leading-tight">Each option becomes a rule the engine has to obey from the next suggestion on. You can review and remove them in the ledger below.</p>
                                 </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                                  {CORRECTION_KINDS.map(k => (
+                                    <label key={k.id} className="flex items-center gap-2 text-[11px] text-red-950 cursor-pointer">
+                                      <input
+                                        type="radio"
+                                        name={`correction-${index}`}
+                                        checked={correctionKind === k.id}
+                                        onChange={() => setCorrectionKind(k.id)}
+                                        className="accent-red-700"
+                                      />
+                                      {k.label}
+                                    </label>
+                                  ))}
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  <label className="space-y-1 block">
+                                    <span className="text-[9px] uppercase font-bold tracking-wider text-red-950">Which piece?</span>
+                                    <select
+                                      value={correctionItemId}
+                                      onChange={(e) => setCorrectionItemId(e.target.value)}
+                                      className="w-full text-[11px] p-2 rounded-lg border border-red-200 bg-white text-stone-900 outline-none focus:ring-1 focus:ring-red-500"
+                                    >
+                                      <option value="">Choose a garment…</option>
+                                      {outfit.items.map(g => (
+                                        <option key={g.id} value={g.id}>{g.item} ({g.color})</option>
+                                      ))}
+                                    </select>
+                                  </label>
+
+                                  {CORRECTION_KINDS.find(k => k.id === correctionKind)?.needsSecond && (
+                                    <label className="space-y-1 block">
+                                      <span className="text-[9px] uppercase font-bold tracking-wider text-red-950">Clashes with</span>
+                                      <select
+                                        value={correctionOtherId}
+                                        onChange={(e) => setCorrectionOtherId(e.target.value)}
+                                        className="w-full text-[11px] p-2 rounded-lg border border-red-200 bg-white text-stone-900 outline-none focus:ring-1 focus:ring-red-500"
+                                      >
+                                        <option value="">Choose a garment…</option>
+                                        {outfit.items.filter(g => g.id !== correctionItemId).map(g => (
+                                          <option key={g.id} value={g.id}>{g.item} ({g.color})</option>
+                                        ))}
+                                      </select>
+                                    </label>
+                                  )}
+                                </div>
+
                                 <textarea
                                   value={feedbackText}
                                   onChange={(e) => setFeedbackText(e.target.value)}
-                                  placeholder="e.g. This knit cardigan is too formal for heavy athletic Kids days or is unsuitable for active chase days. Prefer denim jackets instead..."
+                                  placeholder="Optional note for your own records — this is logged, not parsed."
                                   rows={2}
                                   className="w-full text-xs p-3.5 rounded-lg border border-red-200 bg-white text-stone-900 outline-none focus:ring-1 focus:ring-red-500 resize-none"
                                 />
@@ -727,12 +848,12 @@ export default function OutfitBuilder({
                                     Cancel
                                   </button>
                                   <button
-                                    onClick={() => logWrongOutfitMemory(outfit, index)}
-                                    disabled={isLoggingMemory || !feedbackText.trim()}
+                                    onClick={() => submitCorrection(outfit)}
+                                    disabled={isLoggingMemory || !correctionItemId || (!!CORRECTION_KINDS.find(k => k.id === correctionKind)?.needsSecond && !correctionOtherId)}
                                     className="px-4 py-1.5 bg-red-700 text-stone-50 rounded-md font-bold text-[11px] hover:bg-red-850 disabled:bg-red-300 font-sans tracking-wide uppercase cursor-pointer flex items-center gap-1"
                                   >
                                     {isLoggingMemory ? <RefreshCw className="w-3 h-3 animate-spin" /> : null}
-                                    Log correction memory
+                                    Save rule
                                   </button>
                                 </div>
                               </motion.div>
@@ -844,20 +965,42 @@ export default function OutfitBuilder({
               className="space-y-3 overflow-hidden"
             >
               <p className="text-xs text-brand-sage leading-relaxed">
-                This database board reads directly from the project's locally written <code className="bg-[#FAF9F6] border border-stone-200 px-1 py-0.5 rounded-md font-semibold select-all text-[11px]">memories.md</code> file in your repository. Every correction you log reinforces the rules, telling the engine what combination to avoid.
+                These are the rules the scorer actually enforces, stored in <code className="bg-[#FAF9F6] border border-stone-200 px-1 py-0.5 rounded-md font-semibold select-all text-[11px]">style-guide.json</code>. A vetoed combination is never shown, whatever else it scores. The log underneath is the human-readable record of why each rule exists.
               </p>
 
+              {savedRules.length > 0 && (
+                <ul className="space-y-1.5">
+                  {savedRules.map(rule => (
+                    <li key={rule.id} className="flex items-center justify-between gap-3 bg-white border border-brand-border rounded-lg px-3 py-2 text-[11px]">
+                      <span className="text-brand-charcoal">
+                        <span className="font-mono text-[9px] uppercase tracking-wider text-brand-sage mr-2">{rule.kind}</span>
+                        {rule.label || rule.key}
+                        {rule.activity && <span className="text-brand-sage"> — {rule.activity}</span>}
+                        {typeof rule.delta === "number" && <span className="text-brand-sage"> ({rule.delta > 0 ? "+" : ""}{rule.delta})</span>}
+                      </span>
+                      <button
+                        onClick={() => handleDeleteRule(rule.id)}
+                        title="Remove this rule"
+                        className="text-brand-sage hover:text-red-700 cursor-pointer shrink-0"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
               <div className="bg-[#FAF9F6] border border-brand-border rounded-xl p-4 max-h-60 overflow-y-auto font-mono text-[11px] leading-relaxed select-text text-brand-charcoal whitespace-pre-wrap divide-y divide-brand-border/30">
-                {savedMemories ? savedMemories : "No specific corrections logged yet in memories.md! If the engine fails on item suitability, hit 'Log Styling Mistake' on suggestion cards above."}
+                {savedMemories ? savedMemories : "Nothing corrected yet. When a suggestion is wrong, hit 'Log Styling Mistake' on its card and the engine gains a rule."}
               </div>
 
-              {savedMemories && (
+              {savedRules.length > 0 && (
                 <div className="flex justify-end pr-1 pt-1">
                   <button
                     onClick={handleClearMemories}
                     className="px-3.5 py-1 text-[10px] bg-red-50 text-red-750 hover:bg-red-100 rounded-lg font-bold uppercase tracking-wider border border-red-200/50 flex items-center gap-1 cursor-pointer transition-all"
                   >
-                    <Trash2 className="w-3.5 h-3.5" /> Clear / Reset Ledger
+                    <Trash2 className="w-3.5 h-3.5" /> Clear all rules
                   </button>
                 </div>
               )}

@@ -2,6 +2,7 @@ import React, { useRef, useState } from "react";
 import { FolderUp, UploadCloud, ClipboardCopy, Sparkles, Check, Info } from "lucide-react";
 import { parseSpreadsheetText, initialCuratedWardrobe } from "../data";
 import { WardrobeItem } from "../types";
+import { nameToHex as guessHexColor } from "../engine/colour";
 
 interface ExcelImporterProps {
   onImportComplete: (items: WardrobeItem[]) => void;
@@ -31,11 +32,11 @@ export default function ExcelImporter({ onImportComplete, onClearWardrobe, items
       const fullItems: WardrobeItem[] = parsed.map((item, idx) => ({
         ...item,
         id: `imported-${Date.now()}-${idx}`,
-        // Set solid default color base until Gemini analyzes details
+        // Colour is resolved by the engine lexicon; traits are derived on demand.
         hex: guessHexColor(item.color || "grey"),
         season: item.season || (targetSeason !== "auto" ? targetSeason : "Summer 25-26"),
         aiStyleTags: ["Imported"],
-        aiStylingAdvice: "Unanalyzed. Tap to let Gemini build a customized styling look for this item!"
+        aiStylingAdvice: "Not analysed yet. Open the item to derive its styling traits."
       }));
 
       onImportComplete(fullItems);
@@ -47,29 +48,6 @@ export default function ExcelImporter({ onImportComplete, onClearWardrobe, items
     }
   };
 
-  // Safe client-side guess standard CSS hex values from basic clothes color strings so we render pretty colors instantly!
-  const guessHexColor = (colorStr: string): string => {
-    const raw = (colorStr || "grey").toLowerCase().trim();
-    if (raw.includes("navy")) return "#1e3a8a";
-    if (raw.includes("blue")) return "#60a5fa";
-    if (raw.includes("camel")) return "#c19a6b";
-    if (raw.includes("beige") || raw.includes("oatmeal")) return "#eae6df";
-    if (raw.includes("cream") || raw.includes("sand")) return "#f5f5dc";
-    if (raw.includes("white") || raw.includes("ivory")) return "#fafaf9";
-    if (raw.includes("black")) return "#1c1917";
-    if (raw.includes("grey") || raw.includes("gray")) return "#78716c";
-    if (raw.includes("charcoal")) return "#3f3f46";
-    if (raw.includes("olive")) return "#3d5236";
-    if (raw.includes("sage")) return "#9caf88";
-    if (raw.includes("green")) return "#22c55e";
-    if (raw.includes("cherry") || raw.includes("burgundy") || raw.includes("wine")) return "#58181a";
-    if (raw.includes("red")) return "#ef4444";
-    if (raw.includes("brown") || raw.includes("cognac") || raw.includes("tan")) return "#854d0e";
-    if (raw.includes("pink")) return "#f472b6";
-    if (raw.includes("yellow")) return "#fbbf24";
-    // standard neutral fallback
-    return "#cbd5e1";
-  };
 
   // Drag & drop file reader handlers
   const handleDrag = (e: React.DragEvent) => {

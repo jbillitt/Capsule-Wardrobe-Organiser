@@ -1,0 +1,736 @@
+{
+  "version": 1,
+  "_comment": "Tunable rulebook for the styling engine. Edit freely; the engine reloads it on every request. 'rules' is appended to by the correction form in the app - hand-edit with care.",
+  "palette": {
+    "anchors": [
+      "Black",
+      "Navy",
+      "Cream",
+      "Camel"
+    ],
+    "maxAccents": 1,
+    "neutralRatioTarget": 0.7
+  },
+  "weights": {
+    "colourHarmony": 1,
+    "formality": 1,
+    "occasion": 1.2,
+    "styleDirection": 0.7,
+    "layerWeight": 0.9,
+    "diversity": 0.6
+  },
+  "selection": {
+    "beamWidth": 8,
+    "candidatePool": 24,
+    "maxSharedItems": 1,
+    "reasonStrengthFloor": 0.55,
+    "minConfidenceForClaims": 0.5
+  },
+  "seasons": {
+    "Summer 25-26": {
+      "warmthTarget": 1.6,
+      "tolerance": 1
+    },
+    "Autumn 26": {
+      "warmthTarget": 3,
+      "tolerance": 1.1
+    },
+    "Winter 26": {
+      "warmthTarget": 4.2,
+      "tolerance": 1
+    },
+    "Dream AW": {
+      "warmthTarget": 3.6,
+      "tolerance": 1.2
+    },
+    "Handbag Inventory": {
+      "warmthTarget": 3,
+      "tolerance": 2
+    },
+    "default": {
+      "warmthTarget": 3,
+      "tolerance": 1.3
+    }
+  },
+  "aesthetics": {
+    "French Minimalist": {
+      "neutralRatio": 0.8,
+      "maxColours": 2,
+      "formality": [
+        3,
+        5
+      ],
+      "textures": [
+        "linen",
+        "cotton",
+        "silk",
+        "wool",
+        "leather"
+      ],
+      "voice": [
+        "pared back",
+        "unfussy",
+        "quietly precise"
+      ]
+    },
+    "Quiet Luxury": {
+      "neutralRatio": 0.85,
+      "maxColours": 2,
+      "formality": [
+        4,
+        5
+      ],
+      "textures": [
+        "cashmere",
+        "wool",
+        "silk",
+        "leather",
+        "suede"
+      ],
+      "voice": [
+        "understated",
+        "expensive-feeling",
+        "restrained"
+      ]
+    },
+    "Elevated Casual": {
+      "neutralRatio": 0.6,
+      "maxColours": 3,
+      "formality": [
+        2,
+        4
+      ],
+      "textures": [
+        "denim",
+        "cotton",
+        "merino",
+        "corduroy"
+      ],
+      "voice": [
+        "easy",
+        "unlaboured",
+        "everyday-smart"
+      ]
+    },
+    "Coastal Linen": {
+      "neutralRatio": 0.75,
+      "maxColours": 2,
+      "formality": [
+        2,
+        4
+      ],
+      "textures": [
+        "linen",
+        "chambray",
+        "cotton",
+        "viscose"
+      ],
+      "voice": [
+        "airy",
+        "sun-worn",
+        "loose"
+      ]
+    },
+    "Utility Modern": {
+      "neutralRatio": 0.7,
+      "maxColours": 2,
+      "formality": [
+        2,
+        4
+      ],
+      "textures": [
+        "denim",
+        "cotton",
+        "technical",
+        "leather",
+        "corduroy"
+      ],
+      "voice": [
+        "practical",
+        "hard-wearing",
+        "purposeful"
+      ]
+    },
+    "Soft Romantic": {
+      "neutralRatio": 0.5,
+      "maxColours": 3,
+      "formality": [
+        3,
+        5
+      ],
+      "textures": [
+        "silk",
+        "lace",
+        "viscose",
+        "cashmere"
+      ],
+      "voice": [
+        "gentle",
+        "fluid",
+        "unhurried"
+      ]
+    }
+  },
+  "activities": [
+    {
+      "match": "kids|active|play|park|chase",
+      "label": "Active day with children",
+      "formality": [
+        1,
+        3
+      ],
+      "aesthetic": "Utility Modern",
+      "warmthShift": 0,
+      "ban": [
+        "silk",
+        "satin",
+        "lace",
+        "heel",
+        "stiletto",
+        "clutch",
+        "gown",
+        "velvet"
+      ],
+      "prefer": [
+        "denim",
+        "cotton",
+        "technical",
+        "merino"
+      ],
+      "voice": [
+        "hard-wearing",
+        "unfussy",
+        "made to move in"
+      ],
+      "template": [
+        {
+          "slots": [
+            "base",
+            "dress"
+          ],
+          "required": true
+        },
+        {
+          "slots": [
+            "bottom"
+          ],
+          "required": true,
+          "skipIfDress": true
+        },
+        {
+          "slots": [
+            "shoe"
+          ],
+          "required": true
+        },
+        {
+          "slots": [
+            "mid"
+          ],
+          "required": false
+        },
+        {
+          "slots": [
+            "outer"
+          ],
+          "required": false
+        },
+        {
+          "slots": [
+            "bag"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "match": "reset|lounge|home|rest|recover",
+      "label": "Reset day at home",
+      "formality": [
+        1,
+        3
+      ],
+      "aesthetic": "Elevated Casual",
+      "warmthShift": 0.4,
+      "ban": [
+        "heel",
+        "stiletto",
+        "blazer",
+        "gown",
+        "clutch"
+      ],
+      "prefer": [
+        "merino",
+        "fleece",
+        "cotton",
+        "ribbed",
+        "cashmere"
+      ],
+      "voice": [
+        "soft",
+        "low-effort",
+        "warm"
+      ],
+      "template": [
+        {
+          "slots": [
+            "base",
+            "dress"
+          ],
+          "required": true
+        },
+        {
+          "slots": [
+            "bottom"
+          ],
+          "required": true,
+          "skipIfDress": true
+        },
+        {
+          "slots": [
+            "mid"
+          ],
+          "required": false
+        },
+        {
+          "slots": [
+            "shoe"
+          ],
+          "required": false
+        },
+        {
+          "slots": [
+            "outer"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "match": "errand|town|shops|walk|coffee",
+      "label": "Errand day",
+      "formality": [
+        2,
+        4
+      ],
+      "aesthetic": "Elevated Casual",
+      "warmthShift": 0.2,
+      "ban": [
+        "heel",
+        "stiletto",
+        "gown",
+        "lace"
+      ],
+      "prefer": [
+        "denim",
+        "cotton",
+        "merino",
+        "leather"
+      ],
+      "voice": [
+        "walkable",
+        "quick to throw on",
+        "street-ready"
+      ],
+      "template": [
+        {
+          "slots": [
+            "base",
+            "dress"
+          ],
+          "required": true
+        },
+        {
+          "slots": [
+            "bottom"
+          ],
+          "required": true,
+          "skipIfDress": true
+        },
+        {
+          "slots": [
+            "shoe"
+          ],
+          "required": true
+        },
+        {
+          "slots": [
+            "outer"
+          ],
+          "required": false
+        },
+        {
+          "slots": [
+            "bag"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "match": "saturday|family|market|weekend|outing",
+      "label": "Weekend family day",
+      "formality": [
+        2,
+        4
+      ],
+      "aesthetic": "Coastal Linen",
+      "warmthShift": 0,
+      "ban": [
+        "gown",
+        "stiletto",
+        "clutch"
+      ],
+      "prefer": [
+        "linen",
+        "chambray",
+        "denim",
+        "cotton"
+      ],
+      "voice": [
+        "photogenic",
+        "relaxed",
+        "easy in daylight"
+      ],
+      "template": [
+        {
+          "slots": [
+            "base",
+            "dress"
+          ],
+          "required": true
+        },
+        {
+          "slots": [
+            "bottom"
+          ],
+          "required": true,
+          "skipIfDress": true
+        },
+        {
+          "slots": [
+            "shoe"
+          ],
+          "required": true
+        },
+        {
+          "slots": [
+            "mid"
+          ],
+          "required": false
+        },
+        {
+          "slots": [
+            "outer"
+          ],
+          "required": false
+        },
+        {
+          "slots": [
+            "bag"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "match": "church|service|sunday|funeral|memorial",
+      "label": "Sunday church",
+      "formality": [
+        3,
+        5
+      ],
+      "aesthetic": "Quiet Luxury",
+      "warmthShift": 0.2,
+      "ban": [
+        "legging",
+        "track",
+        "jogger",
+        "sweatpant",
+        "hoodie",
+        "slide",
+        "jandal",
+        "thong",
+        "short",
+        "singlet",
+        "tank",
+        "activewear",
+        "technical"
+      ],
+      "prefer": [
+        "wool",
+        "silk",
+        "merino",
+        "leather",
+        "cotton"
+      ],
+      "requireOneOf": [
+        "outer",
+        "dress",
+        "mid"
+      ],
+      "voice": [
+        "composed",
+        "tidy",
+        "quietly formal"
+      ],
+      "template": [
+        {
+          "slots": [
+            "base",
+            "dress"
+          ],
+          "required": true
+        },
+        {
+          "slots": [
+            "bottom"
+          ],
+          "required": true,
+          "skipIfDress": true
+        },
+        {
+          "slots": [
+            "shoe"
+          ],
+          "required": true
+        },
+        {
+          "slots": [
+            "outer",
+            "mid"
+          ],
+          "required": false
+        },
+        {
+          "slots": [
+            "bag"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "match": "dinner|drinks|evening|date|restaurant|night",
+      "label": "Dinner and drinks",
+      "formality": [
+        3,
+        5
+      ],
+      "aesthetic": "Quiet Luxury",
+      "warmthShift": -0.2,
+      "ban": [
+        "legging",
+        "track",
+        "jogger",
+        "sweatpant",
+        "hoodie",
+        "jandal",
+        "slide",
+        "activewear",
+        "technical",
+        "sneaker"
+      ],
+      "prefer": [
+        "silk",
+        "leather",
+        "wool",
+        "velvet",
+        "suede"
+      ],
+      "voice": [
+        "evening-weight",
+        "considered",
+        "a little sharper"
+      ],
+      "template": [
+        {
+          "slots": [
+            "base",
+            "dress"
+          ],
+          "required": true
+        },
+        {
+          "slots": [
+            "bottom"
+          ],
+          "required": true,
+          "skipIfDress": true
+        },
+        {
+          "slots": [
+            "shoe"
+          ],
+          "required": true
+        },
+        {
+          "slots": [
+            "outer"
+          ],
+          "required": false
+        },
+        {
+          "slots": [
+            "bag"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "match": "wildcard|surprise|random|experiment",
+      "label": "Wildcard",
+      "formality": [
+        1,
+        5
+      ],
+      "aesthetic": "Elevated Casual",
+      "warmthShift": 0,
+      "ban": [],
+      "prefer": [],
+      "voice": [
+        "unexpected",
+        "off-script",
+        "worth a try"
+      ],
+      "adventurous": true,
+      "template": [
+        {
+          "slots": [
+            "base",
+            "dress"
+          ],
+          "required": true
+        },
+        {
+          "slots": [
+            "bottom"
+          ],
+          "required": true,
+          "skipIfDress": true
+        },
+        {
+          "slots": [
+            "shoe"
+          ],
+          "required": true
+        },
+        {
+          "slots": [
+            "mid"
+          ],
+          "required": false
+        },
+        {
+          "slots": [
+            "outer"
+          ],
+          "required": false
+        },
+        {
+          "slots": [
+            "bag",
+            "accessory"
+          ],
+          "required": false
+        }
+      ]
+    }
+  ],
+  "defaultActivity": {
+    "label": "Everyday",
+    "formality": [
+      2,
+      4
+    ],
+    "aesthetic": "Elevated Casual",
+    "warmthShift": 0,
+    "ban": [],
+    "prefer": [],
+    "voice": [
+      "versatile",
+      "easy",
+      "balanced"
+    ],
+    "template": [
+      {
+        "slots": [
+          "base",
+          "dress"
+        ],
+        "required": true
+      },
+      {
+        "slots": [
+          "bottom"
+        ],
+        "required": true,
+        "skipIfDress": true
+      },
+      {
+        "slots": [
+          "shoe"
+        ],
+        "required": true
+      },
+      {
+        "slots": [
+          "mid"
+        ],
+        "required": false
+      },
+      {
+        "slots": [
+          "outer"
+        ],
+        "required": false
+      },
+      {
+        "slots": [
+          "bag"
+        ],
+        "required": false
+      }
+    ]
+  },
+  "retailSources": [
+    {
+      "id": "max",
+      "label": "MAX",
+      "adapter": "shopify",
+      "url": "https://www.max.co.nz",
+      "enabled": true
+    },
+    {
+      "id": "robyn-reynolds",
+      "label": "Robyn Reynolds",
+      "adapter": "shopify",
+      "url": "https://robynreynolds.co.nz",
+      "enabled": true
+    },
+    {
+      "id": "seasalt",
+      "label": "Seasalt Cornwall",
+      "adapter": "jsonld",
+      "url": "https://www.seasaltcornwall.com/clothing/all-clothing",
+      "enabled": true
+    },
+    {
+      "id": "designer-wardrobe",
+      "label": "Designer Wardrobe",
+      "adapter": "nuxt",
+      "url": "https://designerwardrobe.co.nz/shop/",
+      "enabled": true,
+      "_note": "Their grid is client-rendered, so reading it means executing their page script in a node:vm sandbox. vm is a barrier, not a security boundary - leave this off unless you want that."
+    },
+    {
+      "id": "kilt",
+      "label": "KILT",
+      "adapter": "kilt",
+      "url": "https://www.kiltonline.co.nz/all/c39.aspx",
+      "enabled": true
+    }
+  ],
+  "rules": []
+}

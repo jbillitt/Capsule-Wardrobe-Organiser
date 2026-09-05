@@ -1,11 +1,18 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI, Type } from "@google/genai";
-import dotenv from "dotenv";
 import fs from "fs";
 
-dotenv.config();
+import { WardrobeItem } from "./src/types";
+import { guessCategory } from "./src/data";
+import { traitsIndex, traitsFor } from "./src/engine/lexicon";
+import { buildContext, applyTraitRules, keyOf } from "./src/engine/score";
+import { suggestOutfits, dailySeed, diagnose } from "./src/engine/select";
+import { realiseOutfit, realiseItemAdvice, realiseCapsule } from "./src/engine/realise";
+import { searchByVibe, analyseGaps } from "./src/engine/catalogue";
+import { fetchAll } from "./src/engine/retail";
+import { nameToHex } from "./src/engine/colour";
+import * as store from "./src/engine/rules";
 
 const app = express();
 const PORT = 3000;
@@ -13,283 +20,296 @@ const PORT = 3000;
 app.use(express.json({ limit: "200mb" }));
 app.use(express.urlencoded({ limit: "200mb", extended: true }));
 
-// Initialize Gemini safely
-let ai: GoogleGenAI | null = null;
-function getGeminiClient(): GoogleGenAI {
-  if (!ai) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      console.warn("WARNING: GEMINI_API_KEY environment variable is not set. AI features might fail.");
-    }
-    ai = new GoogleGenAI({
-      apiKey: apiKey || "MOCK_KEY",
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        }
-      }
-    });
-  }
-  return ai;
-}
-
-function withTimeout<T>(promise: Promise<T>, ms: number = 30000): Promise<T> {
-  const timeout = new Promise<T>((_, reject) => {
-    setTimeout(() => reject(new Error(`System Engine execution timed out after ${ms/1000}s. Please simplify your query.`)), ms);
-  });
-  return Promise.race([promise, timeout]);
-}
-
 // -------------------------------------------------------------------------
 // SERVER ENDPOINTS
+//
+// No AI, no API keys. Every response below is produced by the styling engine
+// in src/engine: a scored rulebook plus a template language engine.
 // -------------------------------------------------------------------------
 
-// Endpoint 1: Analyze an item to fetch styling advice, style tags, and a CSS hex code.
-app.post("/api/gemini/analyze-item", async (req, res) => {
+
+// -------------------------------------------------------------------------
+// STYLING ENGINE ENDPOINTS
+// -------------------------------------------------------------------------
+
+/** Context for the endpoints that reason about a single item rather than an outfit. */
+function soloContext(activity?: string, season?: string) {
+  const guide = store.loadGuide();
+  return buildContext(guide, new Map(), activity, season);
+}
+
+// Enrich one garment: hex, standard category, style tags, styling advice.
+app.post("/api/style/analyze-item", (req, res) => {
   try {
-    const { item, color, description, brand, notes } = req.body;
-    if (!item) {
-      return res.status(400).json({ error: "Item name is required" });
-    }
+    const body = req.body || {};
+    if (!body.item) return res.status(400).json({ error: "Item name is required" });
 
-    const client = getGeminiClient();
-    
-    const prompt = `Analyze this clothing item and return detailed style profile metadata.
-Item Name: ${item}
-Color Name: ${color || "unspecified"}
-Description: ${description || ""}
-Brand: ${brand || "unspecified"}
-Personal Notes: ${notes || ""}
+    const item: WardrobeItem = {
+      id: body.id || "probe",
+      item: body.item,
+      color: body.color || "",
+      hex: body.hex || nameToHex(body.color),
+      description: body.description || "",
+      brand: body.brand || "",
+      notes: body.notes || "",
+      status: body.status || "existing",
+      season: body.season,
+    };
 
-Generate styling tags, a representative CSS hex color code (high accuracy based on the color description like "Navy Blue" -> "#1e293b", "Olive Green" -> "#3d5236", etc.), a standardized visual category (one of: Tops, Bottoms, Outerwear, Dresses, Shoes, Accessories), and concise chic styling advice for Capsule Wardrobes.`;
+    const traits = traitsFor(item);
+    const ctx = soloContext(undefined, body.season);
+    const advice = realiseItemAdvice(item, traits, ctx);
 
-    const response = await withTimeout(client.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            hex: {
-              type: Type.STRING,
-              description: "A solid CSS 6-digit hex color starting with # representing this clothing color.",
-            },
-            aiSuggestedCategory: {
-              type: Type.STRING,
-              description: "Must be exactly one of: Tops, Bottoms, Outerwear, Dresses, Shoes, Accessories",
-            },
-            aiStyleTags: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-              description: "2-4 stylish tags describing its vibe e.g., 'French Minimalist', 'Office Smart', 'Summer Linen', 'Quiet Luxury'",
-            },
-            aiStylingAdvice: {
-              type: Type.STRING,
-              description: "A short elegant tip (2 sentences max) on how to style this elegant garment to build a capsule look.",
-            }
-          },
-          required: ["hex", "aiSuggestedCategory", "aiStyleTags", "aiStylingAdvice"]
-        }
-      }
-    }));
-
-    const text = response.text?.trim() || "{}";
-    const data = JSON.parse(text);
-    res.json(data);
-  } catch (error: any) {
-    console.error("Error analyzing item with Gemini:", error);
-    // Fallback data if API fails or isn't set up yet
     res.json({
-      hex: "#cbd5e1",
-      aiSuggestedCategory: "Tops",
-      aiStyleTags: ["Classic", "Minimalist"],
-      aiStylingAdvice: "A versatile wardrobe classic. Pair with neutrals for an effortlessly chic and timeless visual balance."
+      hex: traits.hex,
+      aiSuggestedCategory: traits.category,
+      aiStyleTags: advice.aiStyleTags,
+      aiStylingAdvice: advice.aiStylingAdvice,
+      formality: traits.formality,
+      warmth: traits.warmth,
+      slot: traits.slot,
+      confidence: Number(traits.confidence.toFixed(2)),
     });
+  } catch (error: any) {
+    console.error("analyze-item failed:", error);
+    res.status(500).json({ error: "Could not analyse item", details: error.message });
   }
 });
 
-// Endpoint 2: Take available wardrobe list and generate cohesive Capsule Outfit Recommendations
-app.post("/api/gemini/suggest-outfits", async (req, res) => {
+// The core styling engine: score every viable combination, return the day's three.
+app.post("/api/style/suggest-outfits", (req, res) => {
   try {
-    const { items, objective } = req.body;
-    if (!items || !Array.isArray(items) || items.length === 0) {
+    const { items, objective, activity, capsule, seed } = req.body || {};
+    if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: "A list of clothing items is required" });
     }
 
-    const client = getGeminiClient();
+    const guide = store.loadGuide();
+    const traits = traitsIndex(items);
+    applyTraitRules(traits, items, guide);
 
-    // Map to a lightweight representation to save tokens
-    const miniItems = items.map(t => ({
-      id: t.id,
-      item: t.item,
-      color: t.color,
-      brand: t.brand,
-      description: t.description,
-      status: t.status
-    }));
+    // The activity name is embedded in the objective string the UI sends.
+    const activityText = [activity, objective].filter(Boolean).join(" ");
+    const season = items.find((i: WardrobeItem) => i.season)?.season;
+    const ctx = buildContext(guide, traits, activityText, season);
 
-    // Read local styling memories to prevent repeating styling mistakes
-    let stylingMemories = "";
-    const memoriesPath = path.join(process.cwd(), "memories.md");
-    try {
-      if (fs.existsSync(memoriesPath)) {
-        stylingMemories = fs.readFileSync(memoriesPath, "utf-8");
-      } else {
-        // Bootstrap memories file
-        fs.writeFileSync(memoriesPath, `# Gemini Styling Correction Log\n\nThis file lists user styling feedback and outfit suitability corrections.\n`, "utf-8");
-      }
-    } catch (fsErr) {
-      console.warn("Could not read/write memories.md:", fsErr);
+    const usedSeed = seed || dailySeed(ctx.activity.label, capsule || "all");
+    const chosen = suggestOutfits(items, ctx, { count: 3, seed: usedSeed });
+
+    if (!chosen.length) {
+      return res.json({
+        outfits: [],
+        seed: usedSeed,
+        activity: ctx.activity.label,
+        diagnostics: diagnose(items, ctx),
+      });
     }
 
-    const prompt = `You are a high-end fashion director specializing in Capsule Wardrobes. 
-I have a list of clothes in my closet (marked "existing") and some on my wish list (marked "buy"). 
-Based on these items, generate 3 highly cohesive, elegant outfit capsules. 
-
-Stipulate a highly randomized selection approach: Pick items you haven't recently put together! Give me entirely fresh, wildly varied outfit ideas for today (Entropy Seed: ${Date.now()}).
-
-STRICT LEARNED RULES & FEEDBACK CONSTRAINTS:
-You MUST follow the user corrections and styling suitability memories below. If a correction states that an item, color, brand, or style is unsuitable for a specific activity (e.g., kids active days, errand days, church) or shouldn't go together, you MUST STRICTLY obey that negative constraint and do NOT make that mistake again:
-${stylingMemories || "No rules registered yet."}
-
-Focusing on the user's objective/activity: "${objective || "Create versatile everyday outfits"}"
-
-Each outfit should combine 2-4 items from the list. Try to mostly use "existing" items, but you can incorporate up to ONE "buy" item per outfit to show how she can integrate her wishlist items beautifully!
-
-Return exactly 3 outfit suggestions as a JSON array.`;
-
-    const responsePromise = client.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: JSON.stringify(miniItems) + "\n\n" + prompt,
-      config: {
-        temperature: 0.9,
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              name: { type: Type.STRING },
-              description: { type: Type.STRING },
-              itemIds: { type: Type.ARRAY, items: { type: Type.STRING } },
-              occasion: { type: Type.STRING },
-              aesthetic: { type: Type.STRING },
-              stylingNotes: { type: Type.STRING }
-            },
-            required: ["name", "description", "itemIds", "occasion", "aesthetic", "stylingNotes"]
-          }
-        }
-      }
+    const outfits = chosen.map(outfit => {
+      const realised = realiseOutfit(outfit, ctx, usedSeed);
+      return {
+        name: realised.name,
+        description: realised.description,
+        itemIds: realised.items.map(i => i.id),
+        occasion: realised.occasion,
+        aesthetic: realised.aesthetic,
+        stylingNotes: realised.stylingNotes,
+        whyItWorks: realised.whyItWorks,
+        score: realised.score,
+        itemSlots: Object.fromEntries(realised.items.map(i => [i.id, traits.get(i.id)?.slot || "base"])),
+      };
     });
 
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error("Gemini AI request timed out after 45 seconds")), 45000)
-    );
-
-    const response = await Promise.race([responsePromise, timeoutPromise]) as any;
-
-    const text = response.text?.trim() || "[]";
-    const data = JSON.parse(text);
-    res.json({ outfits: data });
+    res.json({ outfits, seed: usedSeed, activity: ctx.activity.label, diagnostics: [] });
   } catch (error: any) {
-    console.error("Error creating outfits with Gemini, falling back to random sampling:", error);
-    try {
-      // Fallback: Randomly select 3 outfits
-      const { items } = req.body;
-      const tops = items.filter((i: any) => ["Tops", "Dresses", "Outerwear"].includes(i.category || i.aiSuggestedCategory) || (!i.category && !i.aiSuggestedCategory));
-      const bottoms = items.filter((i: any) => ["Bottoms", "Dresses", "Shoes", "Accessories"].includes(i.category || i.aiSuggestedCategory));
-      
-      const fallbackOutfits = [];
-      for(let i=0; i<3; i++) {
-        const top = tops[Math.floor(Math.random() * tops.length)];
-        const bottom = bottoms[Math.floor(Math.random() * bottoms.length)];
-        const outfitItems = [top, bottom].filter(Boolean).map(x => x.id);
-        
-        fallbackOutfits.push({
-          name: `Fallback Shuffle ${i+1}`,
-          description: "A procedurally generated random combination since the styling AI is temporarily resting.",
-          itemIds: outfitItems,
-          occasion: "Casual Everyday",
-          aesthetic: "Eclectic Mix",
-          stylingNotes: "Try mixing and matching these randomly selected pieces to discover an unexpected combination."
-        });
-      }
-      res.json({ outfits: fallbackOutfits, isFallback: true });
-    } catch (fallbackError) {
-      res.status(500).json({ error: "Failed to generate outfits", details: error.message });
-    }
+    console.error("suggest-outfits failed:", error);
+    res.status(500).json({ error: "Failed to generate outfits", details: error.message });
   }
 });
 
-// Endpoint 3: Fast Fashion Ideas Looker: search for any vibe or clothing item and suggest full attributes
-app.post("/api/gemini/explore-ideas", async (req, res) => {
+// Vibe search over the staple catalogue plus whatever the retail refresh cached.
+app.post("/api/style/explore-ideas", (req, res) => {
   try {
-    const { query } = req.body;
-    if (!query) {
-      return res.status(400).json({ error: "Vibe or clothing search query is required" });
-    }
+    const { query } = req.body || {};
+    if (!query) return res.status(400).json({ error: "Vibe or clothing search query is required" });
 
-    const client = getGeminiClient();
-
-    const prompt = `The user wants ideas for clothing items to add to their Capsule Wardrobe matching this search / style vibe: "${query}"
-Generate 4 perfect items that would fit this aesthetic. Include standardized categories, colors, brands that make high-quality versions, crisp descriptions, and notes on why they make solid capsule wardrobe investments. All response fields must be stylish and realistic labels. Generate 4 items.`;
-
-    const response = await withTimeout(client.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              item: {
-                type: Type.STRING,
-                description: "Clothing item name (e.g., 'Double-Breasted Blazer', 'Silk Camisole', 'Leather Loafers')",
-              },
-              color: {
-                type: Type.STRING,
-                description: "Color name (e.g., 'Camel', 'Ivory', 'Espresso Brown')",
-              },
-              hex: {
-                type: Type.STRING,
-                description: "CSS 6-digit hex color code starting with # representing this precise color.",
-              },
-              brand: {
-                type: Type.STRING,
-                description: "A premium or cult-classic brand suggested (e.g., 'COS', 'Everlane', 'The Row', 'Toteme')",
-              },
-              description: {
-                type: Type.STRING,
-                description: "Beautiful detailed textile-focused description.",
-              },
-              notes: {
-                type: Type.STRING,
-                description: "Short reason why this is a highly versatile piece for capsule building.",
-              },
-              aiSuggestedCategory: {
-                type: Type.STRING,
-                description: "Must be exactly one of: Tops, Bottoms, Outerwear, Dresses, Shoes, Accessories",
-              }
-            },
-            required: ["item", "color", "hex", "brand", "description", "notes", "aiSuggestedCategory"]
-          }
-        }
-      }
-    }));
-
-    const text = response.text?.trim() || "[]";
-    const data = JSON.parse(text);
-    res.json(data);
+    const entries = searchByVibe(store.loadCatalogue(), query, 4);
+    res.json(
+      entries.map(e => ({
+        item: e.item,
+        color: e.color,
+        hex: e.hex,
+        brand: e.brand,
+        description: e.description,
+        notes: e.notes || (e.url ? `Listed at ${e.brand}${e.price ? ` for ${e.price}` : ""}.` : ""),
+        aiSuggestedCategory: e.category,
+        source: e.source,
+        url: e.url,
+      }))
+    );
   } catch (error: any) {
-    console.error("Error exploring style ideas with Gemini:", error);
+    console.error("explore-ideas failed:", error);
     res.status(500).json({ error: "Failed to explore style ideas", details: error.message });
   }
 });
 
-// Endpoint 4: Online Image Finder for Wardrobe Items
+// Capsule-level summary: keywords, narrative, and a note suggestion per garment.
+app.post("/api/style/summarize-capsule", (req, res) => {
+  try {
+    const { items, season } = req.body || {};
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: "No items provided for analysis" });
+    }
+
+    const guide = store.loadGuide();
+    const traits = traitsIndex(items);
+    applyTraitRules(traits, items, guide);
+    const ctx = buildContext(guide, traits, undefined, season);
+
+    res.json(realiseCapsule(items, traits, ctx, season || "Active Season"));
+  } catch (error: any) {
+    console.error("summarize-capsule failed:", error);
+    res.status(500).json({ error: "Failed to compile style summary", details: error.message });
+  }
+});
+
+// Coverage matrix over slot, formality, warmth and colour role.
+app.post("/api/style/analyze-gaps", (req, res) => {
+  try {
+    const { items, season } = req.body || {};
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: "No clothing items found to check for gaps." });
+    }
+
+    const guide = store.loadGuide();
+    const traits = traitsIndex(items);
+    applyTraitRules(traits, items, guide);
+
+    res.json(analyseGaps(items, traits, store.loadCatalogue(), guide, season || "default"));
+  } catch (error: any) {
+    console.error("analyze-gaps failed:", error);
+    res.status(500).json({ error: "Failed to evaluate gaps", details: error.message });
+  }
+});
+
+// Spreadsheet tab names to the six standard categories.
+app.post("/api/style/condense-categories", (req, res) => {
+  try {
+    const { categories } = req.body || {};
+    if (!Array.isArray(categories) || categories.length === 0) {
+      return res.status(400).json({ error: "No category names input for condensation" });
+    }
+    const categoryMapping: Record<string, string> = {};
+    for (const category of categories) categoryMapping[category] = guessCategory(category);
+    res.json({ categoryMapping });
+  } catch (error: any) {
+    console.error("condense-categories failed:", error);
+    res.status(500).json({ error: "Failed to map standard categories", details: error.message });
+  }
+});
+
+// The activity list and palette, so the UI can offer what the guide defines.
+app.get("/api/style/guide", (_req, res) => {
+  try {
+    const guide = store.loadGuide();
+    res.json({
+      activities: guide.activities.map(a => ({ label: a.label, aesthetic: a.aesthetic, formality: a.formality })),
+      aesthetics: Object.keys(guide.aesthetics),
+      palette: guide.palette,
+      ruleCount: guide.rules.length,
+      catalogue: store.localCatalogueInfo(),
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: "Could not read the style guide", details: error.message });
+  }
+});
+
+// -------------------------------------------------------------------------
+// LEARNED CORRECTIONS
+// -------------------------------------------------------------------------
+
+// Structured correction: becomes a typed rule the scorer provably obeys.
+app.post("/api/memory/wrong", (req, res) => {
+  try {
+    const { kind, key, label, otherKey, otherLabel, activity, slot, delta, note, outfitName } = req.body || {};
+    if (!kind || !key) {
+      return res.status(400).json({ error: "A correction needs a kind and the garment it applies to." });
+    }
+    const rule = store.addCorrection({ kind, key, label, otherKey, otherLabel, activity, slot, delta, note, outfitName });
+    res.json({ success: true, rule, message: "Rule saved. The engine will obey it from the next suggestion on." });
+  } catch (err: any) {
+    console.error("Could not save correction:", err);
+    res.status(500).json({ error: "Failed to persist the correction", details: err.message });
+  }
+});
+
+app.get("/api/memory/list", (_req, res) => {
+  try {
+    res.json({ content: store.readMemories(), rules: store.listRules() });
+  } catch (err: any) {
+    res.status(500).json({ error: "Failed to retrieve corrections", details: err.message });
+  }
+});
+
+app.delete("/api/memory/rule/:id", (req, res) => {
+  try {
+    const removed = store.deleteRule(req.params.id);
+    res.json({ success: removed, rules: store.listRules() });
+  } catch (err: any) {
+    res.status(500).json({ error: "Failed to delete rule", details: err.message });
+  }
+});
+
+app.post("/api/memory/clear", (_req, res) => {
+  try {
+    store.clearRules();
+    res.json({ success: true, message: "All learned rules cleared." });
+  } catch (err: any) {
+    res.status(500).json({ error: "Failed to reset rules", details: err.message });
+  }
+});
+
+// -------------------------------------------------------------------------
+// RETAIL CATALOGUE
+// -------------------------------------------------------------------------
+
+app.get("/api/catalogue/info", (_req, res) => {
+  const guide = store.loadGuide();
+  res.json({
+    ...store.localCatalogueInfo(),
+    total: store.loadCatalogue().length,
+    sources: guide.retailSources,
+  });
+});
+
+// Refresh the cached catalogue from the configured stores. Nothing else in the
+// app ever hits a retailer, so a slow or dead shop can only affect this call.
+app.post("/api/catalogue/refresh", async (req, res) => {
+  try {
+    const guide = store.loadGuide();
+    const only: string[] | undefined = req.body?.sources;
+    const sources = guide.retailSources.filter(s => (only ? only.includes(s.id) : s.enabled));
+
+    const results = await fetchAll(sources.map(s => ({ ...s, enabled: true })));
+    const entries = results.flatMap(r => r.entries);
+    if (entries.length) store.saveLocalCatalogue(entries);
+
+    res.json({
+      success: true,
+      fetched: entries.length,
+      results: results.map(({ entries: _entries, ...summary }) => summary),
+      info: store.localCatalogueInfo(),
+    });
+  } catch (err: any) {
+    console.error("catalogue refresh failed:", err);
+    res.status(500).json({ error: "Catalogue refresh failed", details: err.message });
+  }
+});
+
+// -------------------------------------------------------------------------
+// IMAGE LOOKUP (no AI, no credits - these are left as they were)
+// -------------------------------------------------------------------------
+
 app.post("/api/image-search", async (req, res) => {
   const { item, color, brand } = req.body || {};
   try {
@@ -443,383 +463,6 @@ app.post("/api/scrape-image", async (req, res) => {
   } catch (err: any) {
     console.error("[SCRAPER ERROR]:", err);
     return res.status(500).json({ error: "Unable to access domain. The host might be blocking automated request visits. Please paste a direct image link or upload a local photo file instead.", details: err.message });
-  }
-});
-
-
-// Endpoint 6: Analyze active capsule collection, suggest keywords & notes append
-app.post("/api/gemini/summarize-capsule", async (req, res) => {
-  try {
-    const { items, season } = req.body;
-    if (!items || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ error: "No items provided for analysis" });
-    }
-
-    const client = getGeminiClient();
-
-    const liteItems = items.map(item => ({
-      id: item.id,
-      item: item.item,
-      color: item.color,
-      brand: item.brand,
-      description: item.description,
-      notes: item.notes,
-      category: item.aiSuggestedCategory || "Tops"
-    }));
-
-    const prompt = `You are a professional closet stylist and capsule wardrobe architecture designer.
-We have selected a custom wardrobe subset representing the season "${season || "Active Season"}".
-
-Here are the capsule items:
-${JSON.stringify(liteItems, null, 2)}
-
-Please analyze this active capsule collection and return:
-1. Two to four sleek style Keywords (max 3 words each, e.g. "Nelson Corduroys", "Rich Earthy Layers", "Jewel Pops", "Minimalist Tailoring") representing the capsule's visual DNA.
-2. A beautiful, coherent style summary/description (2-3 sentences max) outlining how these pieces interact together.
-3. A short elegant note enrichment append suggestion (1-5 words max, e.g. "superb corduroy layering", "adds sharp contrast note", "unifies neutral blazers") for each garment based on its design, color, and brand. This must append cleanly onto their existing spreadsheet notes.
-
-Return exactly this JSON response format:
-{
-  "capsuleSummaryKeywords": ["Keyword 1", "Keyword 2", "Keyword 3"],
-  "capsuleDescription": "A narrative summarizing the architectural cohesion, key layering options, and overall aesthetic vibe.",
-  "notesEnrichment": [
-    {
-      "id": "exact_item_id_here",
-      "suggestedNotesAppend": "elegant contrast element"
-    }
-  ]
-}`;
-
-    const response = await withTimeout(client.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            capsuleSummaryKeywords: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-              description: "2 to 4 keywords summarizing the visual DNA of this season's clothing items"
-            },
-            capsuleDescription: {
-              type: Type.STRING,
-              description: "Professional, beautiful summary of the wardrobe's color palette, outerwear weight, and versatility."
-            },
-            notesEnrichment: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  id: { type: Type.STRING, description: "The exact ID of the wardrobe item." },
-                  suggestedNotesAppend: { type: Type.STRING, description: "Short stylistic phrase to append to the item notes (e.g. 'anchors bright outerwear' or 'chic slouchy layering'). Max 5 words." }
-                },
-                required: ["id", "suggestedNotesAppend"]
-              }
-            }
-          },
-          required: ["capsuleSummaryKeywords", "capsuleDescription", "notesEnrichment"]
-        }
-      }
-    }));
-
-    const parsed = JSON.parse(response.text?.trim() || "{}");
-    res.json(parsed);
-  } catch (error: any) {
-    console.error("Error summarizing capsule with Gemini, falling back:", error);
-    try {
-      const fallbackResult = {
-        isFallback: true,
-        capsuleSummaryKeywords: ["Minimalist Core", "Utilitarian Polish", "Neutral Textures"],
-        capsuleDescription: "This season anchors on deeply versatile foundation pieces layered thoughtfully with subtle textural variation. It establishes a robust smart-casual equilibrium optimized for transitional wear without relying on excessive trend cycles.",
-        notesEnrichment: []
-      };
-      res.json(fallbackResult);
-    } catch (fallbackErr) {
-      res.status(500).json({ error: "Failed to compile style summary", details: error.message });
-    }
-  }
-});
-
-
-// Endpoint 7: Analyze wardrobe structure and locate missing garment gaps
-app.post("/api/gemini/analyze-gaps", async (req, res) => {
-  try {
-    const { items, season } = req.body;
-    if (!items || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ error: "No clothing items found to check for gaps." });
-    }
-
-    const client = getGeminiClient();
-    const liteItems = items.map(item => ({
-      item: item.item,
-      color: item.color,
-      category: item.aiSuggestedCategory || "Tops",
-      status: item.status
-    }));
-
-    const prompt = `You are a master wardrobe architecture analyst. We have a capsule collection for season "${season || "Active Season"}".
-We want to evaluate its composition (tops vs bottoms, outerwear, footwear ratio) and identify what key gaps exist that would drastically improve style efficiency.
-
-Here is the current item list:
-${JSON.stringify(liteItems, null, 2)}
-
-Analyze this collection:
-1. Provide a general gap assessment (2 sentences maximum) pointing out what is missing or unbalanced (e.g. "Lacking structured ankle footwear for heavy rain", "Solid outerwear is abundant, but you need soft inner thermal base tops to avoid cold New Zealand winds").
-2. Standardize three explicit high-value additions to fill these gaps. For each item recommend: the name, the standard category (must be one of: Tops, Bottoms, Outerwear, Dresses, Shoes, Accessories), a versatile color, and a brilliant style justification.
-
-Return exactly this JSON response format:
-{
-  "generalGapAssessment": "Your concise 2-sentence review.",
-  "suggestedItemsToBuy": [
-    {
-      "item": "Merino Wool Crewneck",
-      "category": "Tops",
-      "color": "Charcoal Grey",
-      "reason": "Provides thin, high-heat insulating layeys underneath corduroy jacket shells without bulk."
-    }
-  ]
-}`;
-
-    const response = await withTimeout(client.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            generalGapAssessment: {
-              type: Type.STRING,
-              description: "Short, highly tailored review of what's missing or how to boost wardrobe versatility."
-            },
-            suggestedItemsToBuy: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  item: { type: Type.STRING, description: "Name of recommended item to buy (e.g. Chunky Knit Sweater)" },
-                  category: { type: Type.STRING, description: "Must be exactly one of: Tops, Bottoms, Outerwear, Dresses, Shoes, Accessories" },
-                  color: { type: Type.STRING, description: "Recommended versatile color to unify existing items (e.g. Oatmeal Beige)" },
-                  reason: { type: Type.STRING, description: "Editorial brief explanation of why this unblocks more outfit permutations." }
-                },
-                required: ["item", "category", "color", "reason"]
-              },
-              description: "Exactly 3 targeted wardrobe ideas to purchase."
-            }
-          },
-          required: ["generalGapAssessment", "suggestedItemsToBuy"]
-        }
-      }
-    }));
-
-    const parsed = JSON.parse(response.text?.trim() || "{}");
-    res.json(parsed);
-  } catch (error: any) {
-    console.error("Error evaluating wardrobe gaps:", error);
-    try {
-      const fallbackResult = {
-        isFallback: true,
-        generalGapAssessment: "System is using stochastic fallback logic due to API constraints. Analyzing basic structural limits.",
-        suggestedItemsToBuy: [
-          {
-            item: "Classic Tailored Blazer",
-            category: "Outerwear",
-            color: "Charcoal or Navy",
-            reason: "A structural staple that elevates any casual base."
-          },
-          {
-            item: "Premium Pima Cotton Tee",
-            category: "Tops",
-            color: "White",
-            reason: "An essential layering piece that extends the life of deeper-season outerwear."
-          },
-          {
-            item: "Versatile Leather Loafers",
-            category: "Shoes",
-            color: "Black",
-            reason: "A polished alternative to sneakers that anchors smart-casual outfits."
-          }
-        ]
-      };
-      res.json(fallbackResult);
-    } catch (fallbackErr) {
-      res.status(500).json({ error: "Failed to evaluate gaps", details: error.message });
-    }
-  }
-});
-
-
-// Endpoint 8: Standardize non-standard spreadsheet categories into 6 core definitions
-app.post("/api/gemini/condense-categories", async (req, res) => {
-  try {
-    const { categories } = req.body;
-    if (!categories || !Array.isArray(categories) || categories.length === 0) {
-      return res.status(400).json({ error: "No category names input for condensation" });
-    }
-
-    const client = getGeminiClient();
-
-    const prompt = `You are an AI data cleaning assistant.
-We have a set of user-generated wardrobe category titles imported from custom spreadsheet tabs:
-${JSON.stringify(categories, null, 2)}
-
-Please map each unique category/title to exactly one of our 6 standard elegant categories:
-- "Tops"
-- "Bottoms"
-- "Outerwear"
-- "Dresses"
-- "Shoes"
-- "Accessories"
-
-Return exactly this JSON response format with "categoryMappings" as an array of original to standard category mapping pairs:
-{
-  "categoryMappings": [
-    { "original": "pant", "standard": "Bottoms" },
-    { "original": "boot", "standard": "Shoes" }
-  ]
-}`;
-
-    const response = await withTimeout(client.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            categoryMappings: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  original: {
-                    type: Type.STRING,
-                    description: "The original category label from the spreadsheet list."
-                  },
-                  standard: {
-                    type: Type.STRING,
-                    description: "The matched standard capsule category (exactly one of: Tops, Bottoms, Outerwear, Dresses, Shoes, Accessories)."
-                  }
-                },
-                required: ["original", "standard"]
-              },
-              description: "List of maps pairing original custom category/item-type names to standard ones."
-            }
-          },
-          required: ["categoryMappings"]
-        }
-      }
-    }));
-
-    const parsed = JSON.parse(response.text?.trim() || "{}");
-    const dictionary: Record<string, string> = {};
-    if (parsed.categoryMappings && Array.isArray(parsed.categoryMappings)) {
-      parsed.categoryMappings.forEach((m: any) => {
-        if (m.original && m.standard) {
-          dictionary[m.original.trim()] = m.standard.trim();
-        }
-      });
-    } else if (parsed.categoryMapping) {
-      Object.assign(dictionary, parsed.categoryMapping);
-    }
-    res.json({ categoryMapping: dictionary });
-  } catch (error: any) {
-    console.error("Error condensing categories with Gemini, using regex fallback:", error);
-    try {
-      const { categories } = req.body;
-      const dictionary: Record<string, string> = {};
-      
-      const regexMap = {
-        "Bottoms": /pant|jean|trouser|short|skirt/i,
-        "Outerwear": /jacket|coat|blazer|cardigan/i,
-        "Shoes": /shoe|boot|sneaker|heel|sandal/i,
-        "Accessories": /bag|belt|hat|scarf|jewelry/i,
-        "Dresses": /dress|gown/i,
-        "Tops": /top|shirt|blouse|tee|sweater/i
-      };
-      
-      categories.forEach((cat: string) => {
-        let matched = "Tops"; // Default
-        for (const [standardCat, regex] of Object.entries(regexMap)) {
-          if (regex.test(cat)) {
-            matched = standardCat;
-            break;
-          }
-        }
-        dictionary[cat] = matched;
-      });
-      res.json({ categoryMapping: dictionary });
-    } catch (fallbackErr) {
-      res.status(500).json({ error: "Failed to map standard categories", details: error.message });
-    }
-  }
-});
-
-
-// Endpoint 9: Log styling corrections to memories.md (written locally in the repo)
-app.post("/api/memory/wrong", async (req, res) => {
-  try {
-    const { activity, feedback, itemsList, outfitName } = req.body;
-    if (!feedback) {
-      return res.status(400).json({ error: "Feedback detail is required to log a correction." });
-    }
-
-    const memoriesPath = path.join(process.cwd(), "memories.md");
-    const dateStr = new Date().toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit"
-    });
-
-    const formattedEntry = `
-### Correction: ${outfitName || "Custom Styled Outfit"} for "${activity || "General"}" (Logged ${dateStr})
-- **Activity context**: ${activity || "Not specified"}
-- **Styled items**: ${itemsList || "None designated"}
-- **Styling feedback / Learned constraint**: ${feedback}
--------------------------------------------------------------------------
-`;
-
-    // Make sure memories.md exists
-    if (!fs.existsSync(memoriesPath)) {
-      fs.writeFileSync(memoriesPath, `# Gemini Styling Correction Log\n\nThis file lists user styling feedback and outfit suitability corrections.\n`, "utf-8");
-    }
-
-    fs.appendFileSync(memoriesPath, formattedEntry, "utf-8");
-    res.json({ success: true, message: "Memory logged locally in memories.md!" });
-  } catch (err: any) {
-    console.error("Error writing memory correction:", err);
-    res.status(500).json({ error: "Failed to persist memory locally", details: err.message });
-  }
-});
-
-// Endpoint 10: Fetch the contents of memories.md so the UI can display recorded corrections
-app.get("/api/memory/list", async (req, res) => {
-  try {
-    const memoriesPath = path.join(process.cwd(), "memories.md");
-    if (!fs.existsSync(memoriesPath)) {
-      fs.writeFileSync(memoriesPath, `# Gemini Styling Correction Log\n\nThis file lists user styling feedback and outfit suitability corrections.\n`, "utf-8");
-    }
-    const content = fs.readFileSync(memoriesPath, "utf-8");
-    res.json({ content });
-  } catch (err: any) {
-    console.error("Error reading styling memories:", err);
-    res.status(500).json({ error: "Failed to retrieve memories" });
-  }
-});
-
-// Endpoint 11: Clear memories.md back to default bootstrap state
-app.post("/api/memory/clear", async (req, res) => {
-  try {
-    const memoriesPath = path.join(process.cwd(), "memories.md");
-    fs.writeFileSync(memoriesPath, `# Gemini Styling Correction Log\n\nThis file lists user styling feedback and outfit suitability corrections.\n`, "utf-8");
-    res.json({ success: true, message: "Correction logs reset." });
-  } catch (err: any) {
-    console.error("Error clearing styling memories:", err);
-    res.status(500).json({ error: "Failed to reset memories" });
   }
 });
 
