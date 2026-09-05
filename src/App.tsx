@@ -12,6 +12,8 @@ import {
   formatDiagnostics,
   buildBackup,
   parseBackup,
+  loadFromServer,
+  saveToServer,
 } from "./storage";
 import WardrobeCard, { ApparelSilhouette } from "./components/WardrobeCard";
 import OutfitBuilder from "./components/OutfitBuilder";
@@ -157,6 +159,7 @@ export default function App() {
   // Storage health. Saving stays off until we know the existing data was read
   // cleanly, so a bad read can never overwrite a real wardrobe.
   const [storageReady, setStorageReady] = useState(false);
+  const [serverBacked, setServerBacked] = useState(false);
   const [storageNotice, setStorageNotice] = useState<{ tone: "info" | "error"; text: string } | null>(null);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [diagnosticsText, setDiagnosticsText] = useState("");
@@ -168,48 +171,92 @@ export default function App() {
   // empty browser, never as a fallback for a failed read, because the save
   // effect below would immediately write it over the real thing.
   useEffect(() => {
-    const read = loadList<WardrobeItem>(WARDROBE_KEY);
-    logEvent(`wardrobe read: ${read.status} - ${read.message}`);
+    (async () => {
+      const local = loadList<WardrobeItem>(WARDROBE_KEY);
+      const localOutfits = loadList<OutfitSuggestion>(OUTFITS_KEY);
+      logEvent(`browser copy: ${local.status} - ${local.message}`);
 
-    if (read.status === "loaded") {
-      setWardrobe(read.items);
-      setStorageReady(true);
-    } else if (read.status === "empty") {
-      logEvent("no saved wardrobe on this origin; seeding with the sample capsule");
+      const server = await loadFromServer();
+      logEvent(`server copy: ${server.reachable ? "reachable" : "UNREACHABLE"} - ${server.message}`);
+      setServerBacked(server.reachable);
+
+      // The file on disk wins: it outlives the browser.
+      if (server.reachable && server.found && server.wardrobe.length > 0) {
+        setWardrobe(server.wardrobe);
+        if (server.outfits.length) setSavedOutfits(server.outfits);
+        setStorageReady(true);
+        return;
+      }
+
+      // Server running but empty, and this browser has a wardrobe: lift it onto
+      // disk so it can never be trapped in one browser again.
+      if (server.reachable && local.status === "loaded" && local.items.length > 0) {
+        const saved = await saveToServer(local.items, localOutfits.items || []);
+        logEvent(`migrated ${local.items.length} garments from this browser to the server: ${saved.message}`);
+        setWardrobe(local.items);
+        if (localOutfits.status === "loaded") setSavedOutfits(localOutfits.items);
+        setStorageReady(true);
+        setStorageNotice({
+          tone: "info",
+          text: `Your wardrobe has been copied out of the browser and onto disk (${local.items.length} garments). It is now safe from clearing site data, switching browser, or the browser's storage limit.`,
+        });
+        return;
+      }
+
+      if (local.status === "loaded" && local.items.length > 0) {
+        setWardrobe(local.items);
+        if (localOutfits.status === "loaded") setSavedOutfits(localOutfits.items);
+        setStorageReady(true);
+        if (!server.reachable) setStorageNotice({ tone: "error", text: server.message });
+        return;
+      }
+
+      if (local.status === "unreadable" || local.status === "unavailable") {
+        // Show nothing rather than pretending, and refuse to save so the stored
+        // value cannot be clobbered.
+        setWardrobe([]);
+        setStorageReady(false);
+        setStorageNotice({ tone: "error", text: local.message });
+        return;
+      }
+
+      logEvent("nothing saved anywhere; seeding with the sample capsule");
       setWardrobe(initialCuratedWardrobe);
       setStorageReady(true);
       setStorageNotice({
         tone: "info",
-        text: `This browser has no saved wardrobe for ${location.origin}, so the sample capsule is shown. If your wardrobe was entered on another machine, browser, or a different address, it is still there - use "Restore backup" below to bring it across.`,
+        text: `No saved wardrobe was found on disk or in this browser, so the sample capsule is shown. If yours was entered elsewhere, use Restore to bring it across.`,
       });
-    } else {
-      // unreadable or unavailable: show nothing rather than pretending, and
-      // refuse to save so the stored value cannot be clobbered.
-      setWardrobe([]);
-      setStorageReady(false);
-      setStorageNotice({ tone: "error", text: read.message });
-    }
-
-    const outfitsRead = loadList<OutfitSuggestion>(OUTFITS_KEY);
-    logEvent(`outfits read: ${outfitsRead.status} - ${outfitsRead.message}`);
-    if (outfitsRead.status === "loaded") setSavedOutfits(outfitsRead.items);
+    })();
   }, []);
 
-  // Sync to localStorage, but only once we know we read it cleanly.
+  // Persist to disk first, browser second.
   useEffect(() => {
     if (!storageReady) return;
     if (wardrobe.length === 0) return;
-    const result = saveList(WARDROBE_KEY, wardrobe);
-    if (!result.ok) {
-      logEvent(`wardrobe save FAILED: ${result.message}`);
-      setStorageNotice({ tone: "error", text: result.message });
-    }
-  }, [wardrobe, storageReady]);
+
+    const local = saveList(WARDROBE_KEY, wardrobe);
+    if (!local.ok) logEvent(`browser copy not saved: ${local.message}`);
+
+    const timer = setTimeout(async () => {
+      const result = await saveToServer(wardrobe, savedOutfits);
+      if (!result.ok) {
+        logEvent(`server save FAILED: ${result.message}`);
+        setStorageNotice({ tone: "error", text: result.message });
+      } else if (!local.ok) {
+        // Disk is fine, only the browser cache is full: that is not a crisis.
+        setStorageNotice({
+          tone: "info",
+          text: `${local.message} Your wardrobe is still saved on disk, so nothing is at risk.`,
+        });
+      }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [wardrobe, savedOutfits, storageReady]);
 
   useEffect(() => {
     if (!storageReady) return;
-    const result = saveList(OUTFITS_KEY, savedOutfits);
-    if (!result.ok) logEvent(`outfit save FAILED: ${result.message}`);
+    saveList(OUTFITS_KEY, savedOutfits);
   }, [savedOutfits, storageReady]);
 
   // Export to local download file
@@ -267,7 +314,12 @@ export default function App() {
   };
 
   const handleShowDiagnostics = () => {
-    const report = formatDiagnostics(buildDiagnostics(wardrobe, savedOutfits));
+    const where = serverBacked
+      ? "Saved to disk on the app server, with the browser as a cache."
+      : "APP SERVER NOT REACHABLE - this browser is the only copy right now.";
+    const report = `${where}
+
+${formatDiagnostics(buildDiagnostics(wardrobe, savedOutfits))}`;
     setDiagnosticsText(report);
     setShowDiagnostics(true);
     console.info(report);
@@ -279,16 +331,21 @@ export default function App() {
     setActiveTab("closet");
   };
 
-  const handleClearCloset = () => {
+  const handleClearCloset = async () => {
     if (
-      window.confirm(
-        `Delete all ${wardrobe.length} garments from this browser? Download a backup first - this cannot be undone.`
+      !window.confirm(
+        `Delete all ${wardrobe.length} garments? Download a backup first - this cannot be undone.`
       )
     ) {
-      logEvent(`wardrobe cleared by the user (${wardrobe.length} garments)`);
-      setWardrobe([]);
-      localStorage.removeItem(WARDROBE_KEY);
+      return;
     }
+    logEvent(`wardrobe cleared by the user (${wardrobe.length} garments)`);
+    setWardrobe([]);
+    localStorage.removeItem(WARDROBE_KEY);
+    // The save effect skips empty wardrobes, so clear the disk copy explicitly.
+    // The server snapshots what it had first, so this stays undoable.
+    const cleared = await saveToServer([], [], true);
+    logEvent(`server copy cleared: ${cleared.message}`);
   };
 
   const handleCloneToCapsule = () => {

@@ -15,3 +15,6 @@ silhouettes.html
 
 # Wardrobes pulled out of browser storage by scripts/recover-wardrobe.mjs
 recovered-wardrobe-*.json
+
+# The wardrobe itself: her data, not the app.
+data/

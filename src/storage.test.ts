@@ -162,3 +162,11 @@ test("diagnostics find a wardrobe hiding under another key", async () => {
     assert.equal(found!.count, 2);
   });
 });
+
+test("a server snapshot from data/backups can be restored through the UI", async () => {
+  const { parseBackup } = await load();
+  const snapshot = JSON.stringify({ version: 1, updatedAt: "2026-01-01T00:00:00.000Z", wardrobe: [{ id: "a", item: "Chelsea boots" }], outfits: [] });
+  const result = parseBackup(snapshot);
+  assert.equal(result.ok, true, result.message);
+  assert.equal(result.wardrobe?.length, 1);
+});

@@ -1,9 +1,10 @@
 /**
  * Wardrobe persistence.
  *
- * The wardrobe lives in localStorage and NOT in this repo, so it is the only
- * copy of work that took hours to enter. Everything here is built around one
- * rule: never destroy data we failed to understand.
+ * The wardrobe's real home is data/wardrobe.json on the app server; localStorage
+ * is the offline cache, and the only copy when the server is not running.
+ * Everything here is built around one rule: never destroy data we failed to
+ * understand.
  *
  * The previous version did `catch { setWardrobe(initialCuratedWardrobe) }`,
  * and the save effect then wrote those ten seed items straight over the real
@@ -270,9 +271,80 @@ export function formatDiagnostics(d: Diagnostics): string {
 }
 
 // ---------------------------------------------------------------------------
-// Backups. localStorage is per browser, per profile and per origin, so this is
-// the only way to move a wardrobe between machines - including the photos,
-// which the CSV export cannot carry.
+// The server file is the real home for the wardrobe. localStorage stays as an
+// offline cache so the app still shows something if the server is not running.
+// ---------------------------------------------------------------------------
+
+export interface ServerLoad {
+  reachable: boolean;
+  found: boolean;
+  wardrobe: WardrobeItem[];
+  outfits: OutfitSuggestion[];
+  updatedAt: string | null;
+  message: string;
+}
+
+export async function loadFromServer(): Promise<ServerLoad> {
+  try {
+    const res = await fetch("/api/wardrobe");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    return {
+      reachable: true,
+      found: Boolean(data.found),
+      wardrobe: data.wardrobe || [],
+      outfits: data.outfits || [],
+      updatedAt: data.updatedAt || null,
+      message: data.found
+        ? `Loaded ${data.wardrobe.length} garments from ${data.info?.file || "the server"}, saved ${data.updatedAt}.`
+        : "The server has no wardrobe saved yet.",
+    };
+  } catch (err: any) {
+    return {
+      reachable: false,
+      found: false,
+      wardrobe: [],
+      outfits: [],
+      updatedAt: null,
+      message: `The app server is not reachable (${err.message}), so this is running on the browser's own copy. Changes are only being kept in this browser until the server is back.`,
+    };
+  }
+}
+
+export interface ServerSave {
+  ok: boolean;
+  refused: boolean;
+  message: string;
+}
+
+export async function saveToServer(
+  wardrobe: WardrobeItem[],
+  outfits: OutfitSuggestion[],
+  allowEmpty = false
+): Promise<ServerSave> {
+  try {
+    const res = await fetch("/api/wardrobe", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ wardrobe, outfits, allowEmpty }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { ok: false, refused: Boolean(data.refused), message: data.message || data.error || `HTTP ${res.status}` };
+    }
+    return { ok: true, refused: false, message: data.message };
+  } catch (err: any) {
+    return {
+      ok: false,
+      refused: false,
+      message: `Could not save to the app server (${err.message}). The change is held in this browser only.`,
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Backups. Moving a wardrobe between machines, including the photos, which the
+// CSV export cannot carry.
 // ---------------------------------------------------------------------------
 
 export interface Backup {
@@ -317,13 +389,15 @@ export function parseBackup(text: string): RestoreResult {
     return { ok: true, message: `Restored ${parsed.length} garments from a raw item list.`, wardrobe: parsed, outfits: [] };
   }
 
-  if (parsed?.format !== "capsule-wardrobe-backup" || !Array.isArray(parsed.wardrobe)) {
+  // Any object carrying a wardrobe array will do, so the server's own snapshots
+  // in data/backups/ can be dropped straight into Restore.
+  if (!Array.isArray(parsed?.wardrobe)) {
     return { ok: false, message: "That file is not a Capsule Wardrobe backup." };
   }
 
   return {
     ok: true,
-    message: `Restored ${parsed.wardrobe.length} garments and ${parsed.outfits?.length || 0} saved outfits from a backup taken ${parsed.exportedAt}.`,
+    message: `Restored ${parsed.wardrobe.length} garments and ${parsed.outfits?.length || 0} saved outfits from a backup taken ${parsed.exportedAt || parsed.updatedAt || "at an unknown time"}.`,
     wardrobe: parsed.wardrobe,
     outfits: Array.isArray(parsed.outfits) ? parsed.outfits : [],
   };

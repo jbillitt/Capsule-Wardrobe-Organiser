@@ -35,21 +35,33 @@ somehow draw the same picture.
 
 ## Where the wardrobe actually lives
 
-**In the browser, not in this repo.** It is `localStorage` on one machine, in one
-browser profile, at one address. `git pull` does not bring it with you, and
-`http://localhost:3000` and `http://localhost:5173` are two different stores.
+**In `data/wardrobe.json`, next to the app.** The server owns the wardrobe; the browser
+keeps a copy only as an offline cache. That copy is `localStorage`, which is tied to one
+machine, one browser profile and one address, capped at about 5 MB, and erased by
+anything that clears site data — it was lost exactly that way once, which is why the
+file on disk is now the authoritative one.
 
-That makes it the only copy of a lot of typing, so the load path is built around one
-rule: **data we cannot read is never overwritten.** A wardrobe that fails to parse is
-left exactly as it is, copied to a `capsule_closet_wardrobe.unreadable.<time>` key, and
-saving is switched off until you restore something known-good. It is never quietly
-replaced with the sample capsule.
+The file is gitignored: it is her data, not the app's.
+
+Rules the store is built around:
+
+- **A save that would empty a non-empty wardrobe is refused** unless it was explicitly
+  asked for. A stray empty array from the browser is how the data went the first time.
+- **Every overwrite snapshots the previous version** into `data/backups/`, 30 deep.
+- **Data we cannot read is never replaced.** An unparseable `wardrobe.json` is renamed
+  to `wardrobe.json.unreadable.<time>` rather than deleted; the same rule applies to the
+  browser cache, where saving is switched off until you restore something known-good.
+- Writes go through a temp file and a rename, so a crash mid-write cannot truncate it.
+
+On first run against an existing browser wardrobe, the app lifts it onto disk
+automatically and says so. If the server is not running, the app still works from the
+browser cache and warns that this is the only copy.
 
 If something looks wrong:
 
 - **Backup** in the header writes a JSON file containing every garment *and its
-  photos*. The CSV export cannot carry images. This is the only way to move a wardrobe
-  to another computer or browser.
+  photos*. The CSV export cannot carry images. This is the way to move a wardrobe to
+  another computer.
 - **Restore** reads that file back. It also accepts a bare array of items, so a
   wardrobe rescued by hand out of another browser's storage can be pasted straight in.
 - The **stethoscope button** prints a diagnostics report: which origin you are on, how
@@ -57,13 +69,14 @@ If something looks wrong:
   storage key on that origin (flagging any that look like a wardrobe), and a log of
   anything that failed. "Copy report" puts it on the clipboard.
 
-Seeing exactly ten sample garments means the browser had nothing saved for that origin —
-the banner will say so, and the report will show which origin it looked at.
+Seeing exactly ten sample garments means nothing was found on disk *or* in the browser —
+the banner will say so, and the report will show where it looked.
 
 ### Recovering a wardrobe that has gone missing
 
-There is no database in this folder. The server only writes `style-guide.json`,
-`memories.md` and the catalogue cache; the wardrobe has never been stored server-side.
+This is for wardrobes lost *before* `data/wardrobe.json` existed, when the browser was
+the only copy. Check `data/backups/` first — if the wardrobe was ever saved to disk, an
+older version of it is in there.
 
 Browsers keep localStorage in LevelDB files inside the browser profile, and LevelDB is
 append-only — it compacts only occasionally, so a wardrobe that was overwritten in the

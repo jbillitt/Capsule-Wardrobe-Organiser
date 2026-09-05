@@ -13,6 +13,7 @@ import { searchByVibe, analyseGaps } from "./src/engine/catalogue";
 import { fetchAll } from "./src/engine/retail";
 import { nameToHex } from "./src/engine/colour";
 import * as store from "./src/engine/rules";
+import * as wardrobeStore from "./src/wardrobeStore";
 
 const app = express();
 const PORT = 3000;
@@ -27,6 +28,57 @@ app.use(express.urlencoded({ limit: "200mb", extended: true }));
 // in src/engine: a scored rulebook plus a template language engine.
 // -------------------------------------------------------------------------
 
+
+// -------------------------------------------------------------------------
+// THE WARDROBE ITSELF
+//
+// Authoritative copy on disk, in data/wardrobe.json, with rolling snapshots.
+// The browser keeps a copy too, but only as an offline cache.
+// -------------------------------------------------------------------------
+
+app.get("/api/wardrobe", (_req, res) => {
+  try {
+    const stored = wardrobeStore.readWardrobe();
+    res.json({
+      found: Boolean(stored),
+      wardrobe: stored?.wardrobe ?? [],
+      outfits: stored?.outfits ?? [],
+      updatedAt: stored?.updatedAt ?? null,
+      info: wardrobeStore.storeInfo(),
+    });
+  } catch (err: any) {
+    console.error("wardrobe read failed:", err);
+    res.status(500).json({ error: "Could not read the wardrobe", details: err.message });
+  }
+});
+
+app.put("/api/wardrobe", (req, res) => {
+  try {
+    const { wardrobe, outfits, allowEmpty } = req.body || {};
+    if (!Array.isArray(wardrobe)) {
+      return res.status(400).json({ error: "A wardrobe array is required" });
+    }
+    const outcome = wardrobeStore.writeWardrobe(wardrobe, Array.isArray(outfits) ? outfits : [], Boolean(allowEmpty));
+    if (!outcome.ok) {
+      console.warn(`[wardrobe] ${outcome.message}`);
+      return res.status(409).json(outcome);
+    }
+    res.json({ ...outcome, info: wardrobeStore.storeInfo() });
+  } catch (err: any) {
+    console.error("wardrobe save failed:", err);
+    res.status(500).json({ error: "Could not save the wardrobe", details: err.message });
+  }
+});
+
+app.get("/api/wardrobe/backups", (_req, res) => {
+  res.json({ backups: wardrobeStore.listBackups(), info: wardrobeStore.storeInfo() });
+});
+
+app.get("/api/wardrobe/backups/:file", (req, res) => {
+  const backup = wardrobeStore.readBackup(req.params.file);
+  if (!backup) return res.status(404).json({ error: "No such backup" });
+  res.json(backup);
+});
 
 // -------------------------------------------------------------------------
 // STYLING ENGINE ENDPOINTS
